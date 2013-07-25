@@ -143,6 +143,29 @@
       (wait-for-value int-obj (new java.util.Date 1) 3000)
       @int-obj => (new java.util.Date 1)) ; confirm slaved update
 
+    (facts "slaved config for false value gets updated"
+      (def>- int-bool true :validator (instance? Boolean) :ignore-prior-connection true
+        :meta {:doc ..doc-string..})
+      (connect-with-wait! drcfg-host)
+      (zk/nget (zconn!) (ns-path "int-bool")) => true ; default applied
+      @int-bool => true                 ; confirm atom unchanged
+      (drset! (ns-path "int-bool") false)
+      (zk/nget (zconn!) (ns-path "int-bool")) => false ; zk updated
+      (wait-for-value int-bool false 3000)
+      @int-bool => false)
+
+    (facts "slaved config can be updated to nil"
+      (def>- int-nil "can-be-nil" :validator (fn [x] (or (string? x) (nil? x)))
+        :ignore-prior-connection true
+        :meta {:doc ..doc-string..})
+      (connect-with-wait! drcfg-host)
+      (zk/nget (zconn!) (ns-path "int-nil")) => "can-be-nil" ; default applied
+      @int-nil => "can-be-nil"                 ; confirm atom unchanged
+      (drset! (ns-path "int-nil") nil)
+      (zk/nget (zconn!) (ns-path "int-nil")) => nil ; zk updated
+      (wait-for-value int-nil nil 3000)
+      @int-nil => nil)
+
     (facts "pre-configured value gets applied"
       (zk/create (zconn!) (ns-path "int-preconfig") "zk-value")
       (def>- int-preconfig "my-default-value" :validator string?

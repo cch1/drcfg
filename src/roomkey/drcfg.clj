@@ -35,7 +35,7 @@ apply default or actual value"
     (get-or-create-znode client name @la)
     (zk/set-metadata client name (or (meta la) {}))
     (zk/watch client name (fn []
-      (when-let [new-value (zk/nget client name)]
+      (let [new-value (zk/nget client name)]
         (log/debugf "Watched value update: old: %s; new: %s" @la new-value)
         (try-sync la new-value name))))
     (log/debugf "Created new watched-znode %s" name)))

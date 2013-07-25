@@ -1,7 +1,8 @@
 (ns roomkey.integration.zkutil
   (:require [roomkey.zkutil :refer :all]
             [midje.sweet :refer :all]
-            [clojure.tools.logging :as log]))
+            [clojure.tools.logging :as log])
+  (:import [org.apache.zookeeper.KeeperException]))
 
 (def conn-string "localhost:2181/zkutil-integration-tests")
 (def test-root "/sandbox")
@@ -71,4 +72,8 @@
         (ls (conn!) test-node) => []
         (ls-all (conn!) test-node) => [".metadata"]
         (rm (conn!) test-node)
-        (exists? (conn!) test-node) => nil))))
+        (exists? (conn!) test-node) => nil))
+
+    (fact "nget for missing node throws NoNodeException"
+      (nget (conn!) (str test-root "no-such-node"))
+      => (throws org.apache.zookeeper.KeeperException$NoNodeException))))
