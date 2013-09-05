@@ -11,6 +11,7 @@
                  [org.clojure/tools.logging "0.2.6"]
                  [com.netflix.curator/curator-framework "1.3.3"]
                  [com.netflix.curator/curator-recipes "1.3.3"]]
+  :exclusions [log4j]
   :repositories [["releases" {:url "s3p://rk-maven/releases/"}]]
   :profiles {:dev {:resource-paths ["test-resources"]
                    :dependencies [[midje "1.4.0"]
