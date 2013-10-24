@@ -5,6 +5,7 @@
             CuratorFrameworkFactory]
            [com.netflix.curator.framework.recipes.cache ChildData
             NodeCache NodeCacheListener]
+           [org.apache.zookeeper CreateMode]
            [org.apache.zookeeper.KeeperException])
   (require [clojure.string :as string]
            [clojure.tools.logging :as log]))
@@ -30,10 +31,11 @@
 
 (defn create ; code courtesy of https://github.com/qiuxiafei/zk-web
   "Create a node in zk with a client"
-  ([client path data]
+  ([client path data & {:keys [ephemeral?]}]
     (.. client
       (create)
       (creatingParentsIfNeeded)
+      (withMode (if ephemeral? CreateMode/EPHEMERAL CreateMode/PERSISTENT))
       (forPath path (serialize data))))
   ([client path]
     (.. client
