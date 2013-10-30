@@ -156,7 +156,7 @@
 
 (defn watch
   "Watch a node in zk and trigger function when it changes"
-  ;; https://github.com/Netflix/curator/blob/master/curator-recipes/src/main/java/com/netflix/curator/framework/recipes/cache/NodeCache.java
+  ;; https://github.com/Netflix/curator/blob/archive/curator-recipes/src/main/java/com/netflix/curator/framework/recipes/cache/NodeCache.java
   [client path f]
     (let [cache (new NodeCache client path)]
       (.. cache (getListenable) (addListener
