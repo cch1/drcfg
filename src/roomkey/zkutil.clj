@@ -4,7 +4,9 @@
            [com.netflix.curator.framework CuratorFramework
             CuratorFrameworkFactory]
            [com.netflix.curator.framework.recipes.cache ChildData
-            NodeCache NodeCacheListener]
+            NodeCache NodeCacheListener
+            PathChildrenCache PathChildrenCacheMode
+            PathChildrenCacheListener PathChildrenCacheEvent]
            [org.apache.zookeeper CreateMode]
            [org.apache.zookeeper.KeeperException])
   (require [clojure.string :as string]
@@ -165,6 +167,16 @@
             (when (.. cache (getCurrentData)) ; skip nulls (deleted nodes)
               (f))))))
       (.. cache (start))))
+
+(defn watch-children
+  "Watch a node in zk and trigger function when it's children change"
+  [client path f]
+  (let [cache (new PathChildrenCache client path PathChildrenCacheMode/CACHE_PATHS_ONLY)]
+    (.. cache (getListenable) (addListener
+      (proxy [PathChildrenCacheListener] []
+        (childEvent [& _]
+          (f)))))
+    (.. cache (start))))
 
 (defn get-connect-string
   "Recall the connect string for a connected client for use in creating secondary connections"
