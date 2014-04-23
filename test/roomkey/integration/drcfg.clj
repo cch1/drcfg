@@ -144,7 +144,7 @@
       @int-obj => (new java.util.Date 1)) ; confirm slaved update
 
     (facts "slaved config for false value gets updated"
-      (def>- int-bool true :validator (instance? Boolean) :ignore-prior-connection true
+      (def>- int-bool true :validator #(instance? Boolean %) :ignore-prior-connection true
         :meta {:doc ..doc-string..})
       (connect-with-wait! drcfg-host)
       (zk/nget (zconn!) (ns-path "int-bool")) => true ; default applied
