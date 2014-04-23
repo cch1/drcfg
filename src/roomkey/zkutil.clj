@@ -58,7 +58,7 @@
 (defn exists?
   "Check if node exists; returns path if true, nil if false"
   [client path]
-  (if (.. client (checkExists) (forPath path)) path nil))
+  (when (.. client (checkExists) (forPath path)) path))
 
 (defn stat
   "Get stat of a node"
@@ -75,7 +75,7 @@
   "Get raw data from a node"
   [client path]
   (when-let [v (.. client (getData) (forPath path))]
-    (when (> (count v) 0) v)))
+    (when (pos? (count v)) v)))
 
 (defn nset
   "Serialize object and set as data to a node"
