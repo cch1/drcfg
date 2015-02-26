@@ -38,7 +38,7 @@ apply default or actual value"
       (let [new-value (zk/nget client name)]
         (log/debugf "Watched value update: old: %s; new: %s" @la new-value)
         (try-sync la new-value name))))
-    (log/debugf "Created new watched-znode %s" name)))
+    (log/tracef "Created new watched-znode %s" name)))
 
 (let [client (promise)
       unlinked (ref ())]
