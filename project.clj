@@ -9,8 +9,8 @@
   :min-lein-version "2.0.0"
   :dependencies [[org.clojure/clojure "1.6.0"]
                  [org.clojure/tools.logging "0.3.1"]
-                 [com.netflix.curator/curator-framework "1.3.3" :exclusions [org.slf4j/slf4j-log4j12 org.slf4j/slf4j-api log4j]]
-                 [com.netflix.curator/curator-recipes "1.3.3" :exclusions [org.slf4j/slf4j-log4j12]]]
+                 [org.apache.curator/curator-framework "2.7.1" :exclusions [org.slf4j/slf4j-log4j12 org.slf4j/slf4j-api log4j]]
+                 [org.apache.curator/curator-recipes "2.7.1" :exclusions [org.slf4j/slf4j-log4j12]]]
   :repositories [["rk-public" {:url "http://rk-maven-public.s3-website-us-east-1.amazonaws.com/releases/"}] ["releases" {:url "s3://rk-maven/releases/"}]]
   :profiles {:dev {:resource-paths ["test-resources"]
                    :dependencies [[midje "1.6.3"]

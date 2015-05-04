@@ -1,9 +1,9 @@
 (ns roomkey.zkutil
-  (:import [com.netflix.curator.retry RetryNTimes
+  (:import [org.apache.curator.retry RetryNTimes
             ExponentialBackoffRetry BoundedExponentialBackoffRetry]
-           [com.netflix.curator.framework CuratorFramework
+           [org.apache.curator.framework CuratorFramework
             CuratorFrameworkFactory]
-           [com.netflix.curator.framework.recipes.cache ChildData
+           [org.apache.curator.framework.recipes.cache ChildData
             NodeCache NodeCacheListener
             PathChildrenCache PathChildrenCacheMode
             PathChildrenCacheListener PathChildrenCacheEvent]
