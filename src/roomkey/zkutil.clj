@@ -9,8 +9,8 @@
             PathChildrenCacheListener PathChildrenCacheEvent]
            [org.apache.zookeeper CreateMode]
            [org.apache.zookeeper.KeeperException])
-  (require [clojure.string :as string]
-           [clojure.tools.logging :as log]))
+  (:require [clojure.string :as string]
+            [clojure.tools.logging :as log]))
 
 (def ^:private metadata-name ".metadata")
 
