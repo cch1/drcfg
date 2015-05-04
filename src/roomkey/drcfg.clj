@@ -29,16 +29,15 @@
 
 (defn- watch-znode
   "Create a distributed atom with the given name using the given client and
-apply default or actual value"
+  apply default or actual value"
   [client name la]
-  (do
-    (get-or-create-znode client name @la)
-    (zk/set-metadata client name (or (meta la) {}))
-    (zk/watch client name (fn []
-      (let [new-value (zk/nget client name)]
-        (log/debugf "Watched value update: old: %s; new: %s" @la new-value)
-        (try-sync la new-value name))))
-    (log/tracef "Created new watched-znode %s" name)))
+  (get-or-create-znode client name @la)
+  (zk/set-metadata client name (or (meta la) {}))
+  (zk/watch client name (fn []
+                          (let [new-value (zk/nget client name)]
+                            (log/debugf "Watched value update: old: %s; new: %s" @la new-value)
+                            (try-sync la new-value name))))
+  (log/tracef "Created new watched-znode %s" name))
 
 (let [client (promise)
       unlinked (ref ())]
@@ -56,9 +55,8 @@ hostname:port values to represent a zookeeper cluster."
     [hosts]
     (let [connect-string (str hosts zk-prefix)]
       (future (deliver client (zk/zkconn! connect-string))
-        (do
-          (zk/init! @client)
-          (dosync (alter unlinked link-all!))))))
+        (zk/init! @client)
+        (dosync (alter unlinked link-all!)))))
 
   (defn connect-with-wait!
     "Initiate a connection to the zookeeper service and link all previously
