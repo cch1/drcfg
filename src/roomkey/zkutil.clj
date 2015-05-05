@@ -160,13 +160,13 @@
   "Watch a node in zk and trigger function when it changes"
   ;; https://github.com/Netflix/curator/blob/archive/curator-recipes/src/main/java/com/netflix/curator/framework/recipes/cache/NodeCache.java
   [client path f]
-    (let [cache (new NodeCache client path)]
-      (.. cache (getListenable) (addListener
-        (proxy [NodeCacheListener] []
-          (nodeChanged []
-            (when (.. cache (getCurrentData)) ; skip nulls (deleted nodes)
-              (f))))))
-      (.. cache (start))))
+  (let [cache (new NodeCache client path)]
+    (.. cache (getListenable) (addListener
+                               (proxy [NodeCacheListener] []
+                                 (nodeChanged []
+                                   (when (.. cache (getCurrentData)) ; skip nulls (deleted nodes)
+                                     (f))))))
+    (.. cache (start))))
 
 (defn watch-children
   "Watch a node in zk and trigger function when it's children change"
