@@ -40,7 +40,7 @@
   (zk/watch client name (fn []
                           (let [new-value (zk/nget client name)]
                             (try-sync la new-value name))))
-  (log/errorf "********** Created new watched-znode %s" name))
+  (log/tracef "Created new watched-znode %s" name))
 
 ;; NB: this function runs in the current thread and may block!
 ;; NB: the name parameter must be properly namespaced!
