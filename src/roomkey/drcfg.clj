@@ -50,14 +50,18 @@
   [name v]
   (zk/nset @*client* name v))
 
+(defn status
+  []
+  (let [realized-registry (reduce (fn [memo [p [la linked?]]]
+                                    (conj memo [p (boolean linked?) @la]))
+                                  [] @*registry*)]
+    (sort-by (comp second first) realized-registry)))
+
 (let [truncl (fn [n s] (if (<= (.length s) n) s (string/reverse (subs (string/reverse s) 0 n))))]
   (defn status-report
     [& {:keys [formatter]
-        :or {formatter #(format "%1.1s %32.32s %-45.45s" (if %2 " " "*") (truncl 32 %1) (pr-str %3))}}]
-    (let [rendered-registry (reduce (fn [memo [p [la linked?]]]
-                                      (conj memo (formatter p linked? @la)))
-                                    [] @*registry*)]
-      (string/join "\n" (sort rendered-registry)))))
+        :or {formatter (fn [[p l? v]] (format "%1.1s %32.32s %-45.45s" (if l? " " "*") (truncl 32 p) (pr-str v)))}}]
+    (string/join "\n" (map formatter (status)))))
 
 (defn- link
   [client n [la linked?]]

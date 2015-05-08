@@ -28,6 +28,12 @@
       *client* => (refers-to ..client..)
       *registry* => (refers-to (contains {"x" (just [..localAtom.. truthy])}))))
 
+(fact "status returns status"
+  (binding [roomkey.drcfg/*registry* (agent {"/x/y" [(atom 10) false]
+                                             "/y/x" [(atom 5) true]})]
+    (status) => (just [["/x/y" false 10] ["/y/x" true 5]])))
+
 (fact "status-report reports status"
-  (binding [roomkey.drcfg/*registry* (agent {"/x/y" [(atom 10) false]})]
+  (binding [roomkey.drcfg/*registry* (agent {"/x/y" [(atom 10) false]
+                                             "/y/x" [(atom 5) true]})]
     (status-report) => string?))
