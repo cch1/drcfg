@@ -129,20 +129,16 @@
     (rmr client (child-path path child)))
   (rm client path))
 
-(defn- connect-inner ; code courtesy of https://github.com/qiuxiafei/zk-web
+(defn connect ; code courtesy of https://github.com/qiuxiafei/zk-web
   "Create a zk client using addr as connecting string"
   [addr]
   (let [client (.. (CuratorFrameworkFactory/builder)
-                (connectString addr)
-                ;(retryPolicy (BoundedExponentialBackoffRetry. 1000 60000 Integer/MAX_VALUE))
-                (retryPolicy (RetryNTimes. Integer/MAX_VALUE 5000))
-                (build))]
-        (.start client)
-        client))
-
-(def zkconn!
-  "Connect to zookeeper, using memoized connection if available"
-  (memoize connect-inner))
+                   (connectString addr)
+                   ;(retryPolicy (BoundedExponentialBackoffRetry. 1000 60000 Integer/MAX_VALUE))
+                   (retryPolicy (RetryNTimes. Integer/MAX_VALUE 5000))
+                   (build))]
+    (.start client)
+    client))
 
 (defn init!
   "Initialize a zookeeper environment (i.e. create root node if necessary)"
