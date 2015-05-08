@@ -27,3 +27,7 @@
         (#'roomkey.drcfg/watch-znode ..client.. "x" anything) => ..irrelevant..)
       *client* => (refers-to ..client..)
       *registry* => (refers-to (contains {"x" (just [..localAtom.. truthy])}))))
+
+(fact "status-report reports status"
+  (binding [roomkey.drcfg/*registry* (agent {"/x/y" [(atom 10) false]})]
+    (status-report) => string?))

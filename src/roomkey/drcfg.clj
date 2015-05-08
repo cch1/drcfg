@@ -50,13 +50,13 @@
   [name v]
   (zk/nset @*client* name v))
 
-(let [truncl (fn [n s] (string/reverse (subs (string/reverse s) 0 n)))]
+(let [truncl (fn [n s] (if (<= (.length s) n) s (string/reverse (subs (string/reverse s) 0 n))))]
   (defn status-report
-    [registry & {:keys [formatter]
-                 :or {formatter #(format "%1.1s %32.32s %-45.45s" (if %2 " " "*") (truncl 32 %1) (pr-str %3))}}]
+    [& {:keys [formatter]
+        :or {formatter #(format "%1.1s %32.32s %-45.45s" (if %2 " " "*") (truncl 32 %1) (pr-str %3))}}]
     (let [rendered-registry (reduce (fn [memo [p [la linked?]]]
                                       (conj memo (formatter p linked? @la)))
-                                    [] @registry)]
+                                    [] @*registry*)]
       (string/join "\n" (sort rendered-registry)))))
 
 (defn- link
