@@ -4,11 +4,13 @@
             [roomkey.drcfg.client :as client]
             [midje.sweet :refer :all]
             [midje.checking.core :refer [extended-=]]
-            [clojure.tools.logging :as log]))
+            [clojure.tools.logging :as log])
+  (:import [org.apache.curator.test TestingServer]))
 
-(def drcfg-host "localhost:2181")
 (def bogus-host "127.1.1.1:9999")
-(def zconn (client/connect drcfg-host))
+(def test-server (TestingServer. true))
+(def connect-string (.getConnectString test-server))
+(def zconn (client/connect connect-string))
 
 (def root "/sandbox")
 
@@ -53,7 +55,7 @@
                                     ?form
                                     (when (realized? roomkey.drcfg/*client*) (.close @roomkey.drcfg/*client*)))
                                   (cleanup!))
-                              (log/infof "Zookeeper unavailable on %s - skipping %s" drcfg-host *ns*)))])
+                              (log/infof "Zookeeper unavailable on %s - skipping %s" connect-string *ns*)))])
 
 (fact "can create a config value without a connection"
   (let [n (next-path)]
@@ -61,7 +63,7 @@
     (>- n "my-default-value" :validator string?)) => (refers-to "my-default-value"))
 
 (fact "Registration after connect still sets local atom"
-  (connect! drcfg-host)
+  (connect! connect-string)
   (>- (next-path) "my-default-value" :validator string?) => (refers-to "my-default-value"))
 
 (fact "connect! can continue if server not available"
@@ -71,7 +73,7 @@
 (fact "Slaved config value gets updated post-connect"
   (let [n (next-path)
         la (>- n "V0" :validator string?)]
-    (connect! drcfg-host)
+    (connect! connect-string)
     (sync-path 5000 zconn n "V0")
     (zk/nset zconn n "V1")
     la => (eventually-refers-to 10000 "V1")))
@@ -79,7 +81,7 @@
 (fact "Serialization works"
   (let [n (next-path)
         la (>- n 0 :validator integer?)]
-    (connect! drcfg-host)
+    (connect! connect-string)
     (sync-path 5000 zconn n 0)
     (zk/nset zconn n 1)
     la => (eventually-refers-to 10000 1)))
@@ -87,14 +89,14 @@
 (fact "Metadata is stored"
   (let [n (next-path)]
     (>- n 0 :validator integer? :meta {:doc "my doc string"})
-    (connect! drcfg-host)
+    (connect! connect-string)
     (sync-path 5000 zconn n 0)
     (zk/get-metadata zconn n) => {:doc "my doc string"}))
 
 (fact "Validator prevents updates to local atom"
   (let [n (next-path)
         la (>- n 0 :validator integer?)]
-    (connect! drcfg-host)
+    (connect! connect-string)
     (sync-path 5000 zconn n 0)
     (zk/nset zconn n "x")
     (sync-path 5000 @roomkey.drcfg/*client* n "x")
@@ -103,7 +105,7 @@
 (fact "Without a validator, heterogenous values are allowed"
   (let [n (next-path)
         la (>- n 0)]
-    (connect! drcfg-host)
+    (connect! connect-string)
     (sync-path 5000 zconn n 0)
     (zk/nset zconn n "x")
     (sync-path 5000 @roomkey.drcfg/*client* n "x")
@@ -125,5 +127,5 @@
   (let [n (next-path)]
     (zk/create zconn n "value")
     (let [la (>- n "default-value")]
-      (connect! drcfg-host)
+      (connect! connect-string)
       la => (eventually-refers-to 10000 "value"))))

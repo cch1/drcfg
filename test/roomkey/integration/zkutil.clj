@@ -2,12 +2,15 @@
   (:require [roomkey.zkutil :refer :all]
             [midje.sweet :refer :all]
             [clojure.tools.logging :as log])
-  (:import [org.apache.zookeeper.KeeperException]))
+  (:import [org.apache.curator.test TestingServer]
+           [org.apache.zookeeper.KeeperException]))
 
-(def connection-string "localhost:2181/zkutil-integration-tests")
+(def test-server (TestingServer. true))
+(def connect-string (.getConnectString test-server))
+
 (def test-root "/sandbox")
 
-(def client (connect connection-string))
+(def client (connect connect-string))
 
 (defn connected?
   [timeout c]
@@ -24,7 +27,7 @@
                               (do (cleanup! client)
                                   ?form
                                   (cleanup! client))
-                              (log/infof "Zookeeper unavailable on %s - skipping %s" connection-string *ns*)))])
+                              (log/infof "Zookeeper unavailable on %s - skipping %s" connect-string *ns*)))])
 
 (facts "basic zkutil primitives work"
   (if (exists? client test-root) true false) => true

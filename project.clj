@@ -19,6 +19,7 @@
                  ["releases" {:url "s3://rk-maven/releases/"}]]
   :profiles {:dev {:resource-paths ["test-resources"]
                    :dependencies [[midje "1.6.3"]
+                                  [org.apache.curator/curator-test "2.7.1"]
                                   [org.slf4j/slf4j-api "1.7.12"]
                                   [org.slf4j/jcl-over-slf4j "1.7.12"]
                                   [org.slf4j/slf4j-log4j12 "1.7.12"]
