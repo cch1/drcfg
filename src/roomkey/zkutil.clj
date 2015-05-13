@@ -14,7 +14,7 @@
 
 (def ^:private metadata-name ".metadata")
 
-(defn- metapath [path] (str path "/" metadata-name))
+(defn- metapath [path] (str (if (= "/" path) "" path) "/" metadata-name))
 
 (defn deserialize
   "convert bytes to object"
@@ -169,9 +169,9 @@
   [client path f]
   (let [cache (new PathChildrenCache client path PathChildrenCacheMode/CACHE_PATHS_ONLY)]
     (.. cache (getListenable) (addListener
-      (proxy [PathChildrenCacheListener] []
-        (childEvent [& _]
-          (f)))))
+                               (proxy [PathChildrenCacheListener] []
+                                 (childEvent [& _]
+                                   (f)))))
     (.. cache (start))))
 
 (defn get-connect-string
