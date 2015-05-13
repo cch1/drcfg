@@ -63,6 +63,23 @@
         :or {formatter (fn [[p l? v]] (format "%1.1s %32.32s %-45.45s" (if l? " " "*") (truncl 32 p) (pr-str v)))}}]
     (string/join "\n" (map formatter (status)))))
 
+(defn candidates-for-deletion
+  [client max-age]
+  (let [day (* 1000 60 60 24)
+        now (System/currentTimeMillis)]
+    (zk/visit client
+              (fn [acc node path]
+                (let [depth (count path)
+                      ttouched (zk/touched-at client node)
+                      age (and ttouched (float (/ (- now ttouched) 1000 60 60 24)))]
+                  (log/infof "Considering %d %03.1f %s" depth age node)
+                  (if (or (and (> depth 1) (nil? age)) (and age (> age max-age)))
+                    (assoc acc node age)
+                    (do (log/debugf "Found fresh (%2.2f) node: %s" age node)
+                        acc))))
+              {}
+              "/")))
+
 (defn- link
   [client n [la linked?]]
   (if linked?
