@@ -104,7 +104,7 @@
   {:pre [(re-matches #"/.+" name)] :post [(instance? clojure.lang.Atom %)]}
   (zk/serialize default) ;; throws exception if object is not serializable
   (let [la (apply atom default options)]
-    (add-watch la :logger (fn [k r o n] (log/debugf "Watched value update: old: %s; new: %s" o n)))
+    (add-watch la :logger (fn [k r o n] (log/debugf "Watched value of %s update: old: %s; new: %s" name o n)))
     (if (realized? *client*)
       (log/errorf "New drcfg reference %s defined after connect -- will not be linked to zookeeper" name)
       (send *registry* register name la))
