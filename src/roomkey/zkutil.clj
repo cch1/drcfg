@@ -10,6 +10,7 @@
            [org.apache.zookeeper CreateMode]
            [org.apache.zookeeper.KeeperException])
   (:require [clojure.string :as string]
+            [clojure.zip :as zip]
             [clojure.tools.logging :as log]))
 
 (def ^:private metadata-name ".metadata")
@@ -178,3 +179,19 @@
   "Recall the connect string for a connected client for use in creating secondary connections"
   [client]
   (.. client (getZookeeperClient) (getCurrentConnectionString)))
+
+(defn touched-at
+  [c n]
+  (-> n metapath ((partial stat c)) :mtime))
+
+(defn visit
+  "Visit a ZooKeeper tree with the given client and given visitor function"
+  [c visitor memo root]
+  (let [branch? (constantly true)
+        children (fn [n] (seq (map #(str (if (= "/" n) "" n) "/" %) (ls c n))))
+        zipper (zip/zipper branch? children identity root)]
+    (loop [loc zipper acc memo]
+      (if (zip/end? loc)
+        acc
+        (let [acc (visitor acc (zip/node loc) (zip/path loc))]
+          (recur (zip/next loc) acc))))))
