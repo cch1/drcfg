@@ -9,9 +9,7 @@
 ;;; USAGE:  see /roomkey/README.md
 
 (def ^:dynamic *client* (promise))
-(def ^:dynamic *registry*
-  ;; Use an agent to serialize ops and ensure that linking is never retried due to concurrent registering
-  (agent {} :error-handler (fn [_ e] (log/warn e "The drcfg registry agent threw an exception"))))
+(def ^:dynamic *registry* (ref {}))
 
 (defmacro ns-path [n]
   `(str "/" (str *ns*) "/" ~n))
@@ -103,8 +101,8 @@
   before returning"
   [hosts & [timeout]]
   (let [c (client/connect hosts)]
-    (send *registry* (partial link-all! c))
-    (let [result (await-for (or timeout 20000) *registry*)]
+    (dosync (alter *registry* (partial link-all! c)))
+    (let [result (deref *registry*)]
       (deliver *client* c)
       result)))
 
@@ -124,7 +122,7 @@
     (add-watch la :logger (fn [k r o n] (log/debugf "Watched value of %s update: old: %s; new: %s" name o n)))
     (if (realized? *client*)
       (log/errorf "New drcfg reference %s defined after connect -- will not be linked to zookeeper" name)
-      (send *registry* register name la))
+      (dosync (alter *registry* register name la)))
     la))
 
 (defmacro def>-

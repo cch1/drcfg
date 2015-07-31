@@ -9,7 +9,7 @@
   (checker [actual] (extended-= (deref actual) expected)))
 
 (background (around :facts (binding [roomkey.drcfg/*client* (promise)
-                                     roomkey.drcfg/*registry* (agent {})]
+                                     roomkey.drcfg/*registry* (ref {})]
                              ?form)))
 
 (facts ">- returns a local atom"
@@ -20,7 +20,7 @@
   *registry* => (refers-to (contains {"/ns/x" (just [(partial instance? clojure.lang.Atom) falsey])})))
 
 (fact "connect-with-wait! does its stuff"
-  (binding [roomkey.drcfg/*registry* (agent {"x" [..localAtom.. false]})]
+  (binding [roomkey.drcfg/*registry* (ref {"x" [..localAtom.. false]})]
       (connect-with-wait! "hosts") => anything
       (provided
         (client/connect (as-checker string?)) => ..client..

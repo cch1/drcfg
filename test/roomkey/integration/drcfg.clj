@@ -51,7 +51,7 @@
 (background [(around :facts (if (zk/is-connected? zconn)
                               (do (cleanup!)
                                   (binding [roomkey.drcfg/*client* (promise)
-                                            roomkey.drcfg/*registry* (agent {})]
+                                            roomkey.drcfg/*registry* (ref {})]
                                     ?form
                                     (when (realized? roomkey.drcfg/*client*) (.close @roomkey.drcfg/*client*)))
                                   (cleanup!))
