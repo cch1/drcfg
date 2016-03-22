@@ -1,12 +1,8 @@
 (ns roomkey.zkutil
   (:import [org.apache.curator.retry RetryNTimes
             ExponentialBackoffRetry BoundedExponentialBackoffRetry]
-           [org.apache.curator.framework CuratorFramework
-            CuratorFrameworkFactory]
-           [org.apache.curator.framework.recipes.cache ChildData
-            NodeCache NodeCacheListener
-            PathChildrenCache PathChildrenCacheMode
-            PathChildrenCacheListener PathChildrenCacheEvent]
+           [org.apache.curator.framework CuratorFramework CuratorFrameworkFactory]
+           [org.apache.curator.framework.recipes.cache ChildData NodeCache NodeCacheListener]
            [org.apache.zookeeper CreateMode]
            [org.apache.zookeeper.KeeperException])
   (:require [clojure.zip :as zip]))
@@ -161,16 +157,6 @@
                                  (nodeChanged []
                                    (when (.. cache (getCurrentData)) ; skip nulls (deleted nodes)
                                      (f))))))
-    (.. cache (start))))
-
-(defn watch-children
-  "Watch a node in zk and trigger function when it's children change"
-  [client path f]
-  (let [cache (new PathChildrenCache client path PathChildrenCacheMode/CACHE_PATHS_ONLY)]
-    (.. cache (getListenable) (addListener
-                               (proxy [PathChildrenCacheListener] []
-                                 (childEvent [& _]
-                                   (f)))))
     (.. cache (start))))
 
 (defn get-connect-string
