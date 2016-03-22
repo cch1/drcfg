@@ -1,9 +1,7 @@
 (ns roomkey.drcfg.client
   "Dynamic Distributed Run-Time configuration"
   (:import org.apache.zookeeper.KeeperException)
-  (:require [roomkey.zkutil :as zk]
-            [clojure.string :as string]
-            [clojure.tools.logging :as log]))
+  (:require [roomkey.zkutil :as zk]))
 
 (def zk-prefix "/drcfg")
 
