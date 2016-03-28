@@ -1,6 +1,6 @@
 (defproject com.roomkey/drcfg :lein-v
   :description "Dynamic Runtime Configuration Utility based on Zookeeper"
-  :url "https://github.com/g1nn13/drcfg"
+  :url "https://github.com/roomkey/drcfg"
   :plugins [[com.roomkey/lein-v "5.0.1"]]
   :license {:name "Copyright Hotel JV Services LLC"
             :distribution :manual
@@ -16,10 +16,11 @@
                  [org.apache.curator/curator-recipes "3.1.0"]]
   :repositories [["rk-public" {:url "http://rk-maven-public.s3-website-us-east-1.amazonaws.com/releases/"}]
                  ["releases" {:url "s3://rk-maven/releases/"}]]
-  :profiles {:dev {:resource-paths ["test-resources"]
-                   :dependencies [[midje "1.8.3"]
+  :jvm-opts ["-Djava.io.tmpdir=./tmp"]
+  :profiles {:dev {:dependencies [[midje "1.8.3"]
                                   [org.apache.curator/curator-test "3.1.0"]
                                   [org.slf4j/slf4j-api "1.7.19"]
                                   [org.slf4j/jcl-over-slf4j "1.7.19"]
                                   [org.slf4j/slf4j-log4j12 "1.7.19"]
-                                  [log4j/log4j "1.2.17"]]}})
+                                  [log4j/log4j "1.2.17"]]}
+             :test {:resource-paths ["test-resources"]}})
