@@ -22,6 +22,7 @@
 ;;; with the following major differences:
 ;;;  * The read state (accessed via deref) may lag successful write operations (e.g. swap!)
 ;;;  * Read-only metadata is available which represents the zookeeper Stat data structure
+;;;  * No updates are possible while disconnected
 ;;;  * The compare-and-set semantics are tightened to insist that updates can only apply to the
 ;;;    current value AND current version.
 ;;;  * The swap operation can fail if there is too much contention for a znode.
@@ -46,6 +47,7 @@
     (reset! client c)
     (.zProcessUpdate this {:path path :event-type ::boot}))
   (zDisconnect [this] (reset! client nil))
+  ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
   (zProcessUpdate [this {:keys [event-type keeper-state] path' :path}]
     (log/debugf "Change %s %s %s" path' event-type keeper-state)
     (assert (= path path') (format "Got event for wrong path: %s : %s" path path'))
@@ -60,6 +62,7 @@
                    old-d (-> old-z :data deserialize)
                    new-v (-> new-z :stat :version)
                    old-v (-> old-z :stat :version)]
+               (validate! @validator new-d)
                (reset! cache new-z)
                (when (and (pos? old-v) (not= 1 (- new-v old-v)))
                  (log/warnf "Received non-sequential version [%d -> %d] for %s (%s %s)"
@@ -78,7 +81,6 @@
   (meta [this] (-> cache deref :stat))
   ;; Observe Interface
   clojure.lang.IRef
-  ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
   (setValidator [this f]
     (validate! f (.deref this))
     (reset! validator f)
@@ -91,6 +93,7 @@
   VersionedUpdate
   (compareVersionAndSet [this current-version newval]
     (when-not @client (throw (RuntimeException. "Not connected")))
+    (validate! @validator newval)
     (boolean (try (zoo/set-data @client path (serialize newval) current-version)
                   (catch KeeperException e
                     (when-not (= (.code e) KeeperException$Code/BADVERSION)
@@ -100,7 +103,6 @@
   (compareAndSet [this oldval newval]
     (let [current @cache
           version (-> current :stat :version)]
-      (validate! @validator newval)
       (boolean (and (= oldval (-> current :data deserialize))
                     (.compareVersionAndSet this version newval)))))
   (swap [this f]
@@ -109,7 +111,6 @@
       (let [current @cache
             value (-> current :data deserialize f)
             version (-> current :stat :version)]
-        (validate! @validator value)
         (if (.compareVersionAndSet this version value) value (recur (dec i))))))
   (swap [this f x] (.swap this (fn [v] (f v x))))
   (swap [this f x y] (.swap this (fn [v] (f v x y))))

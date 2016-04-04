@@ -101,6 +101,18 @@
       @sync
       $z)) => (refers-to "B"))
 
+(fact "A connected ZRef is not updated by invalid values at the cluster"
+  (with-open [$c (client (str connect-string sandbox))]
+    (let [$z (connect $c (zref "/myzref" "A" :validator string?))
+          sync (promise)]
+      (add-watch $z :sync (fn [& args] (deliver sync args)))
+      (with-open [c (client (str connect-string sandbox))]
+        (zoo/set-data c "/myzref" (#'z/serialize 23) 0))
+      (with-open [c (client (str connect-string sandbox))]
+        (zoo/set-data c "/myzref" (#'z/serialize "B") 1))
+      @sync
+      $z)) => (refers-to "B"))
+
 (fact "A connected ZRef is updated by deletion at the cluster"
   (with-open [$c (client (str connect-string sandbox))]
     (let [$z (connect $c (zref "/myzref" "A"))
