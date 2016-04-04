@@ -38,58 +38,62 @@
   (with-open [$c (client connect-string)]
     (zoo/exists $c sandbox)) => truthy)
 
-(fact "Can create a ZRef in a virgin zookeeper"
-  (with-open [$c (client (str connect-string sandbox))]
-    (zref $c "/myzref" "A")) => (partial instance? roomkey.zref.ZRef))
+(fact "Can create a ZRef"
+  (zref "/myzref" "A") => (partial instance? roomkey.zref.ZRef))
 
 (fact "A validator can be added"
-  (with-open [$c (client (str connect-string sandbox))]
-    (let [$z (zref $c "/zref0" 1)]
-      (set-validator! $z odd?) => nil?
-      (get-validator $z) => (exactly odd?))))
+  (let [$z (zref "/zref0" 1)]
+    (set-validator! $z odd?) => nil?
+    (get-validator $z) => (exactly odd?)))
 
 (fact "New validators must validate current value"
-  (with-open [$c (client (str connect-string sandbox))]
-    (let [$z (zref $c "/zref0" 1)]
-      (set-validator! $z even?) => (throws IllegalStateException))))
+  (let [$z (zref "/zref0" 1)]
+    (set-validator! $z even?) => (throws IllegalStateException)))
 
 (fact "Default values must validate"
-  (with-open [$c (client (str connect-string sandbox))]
-    (zref $c "/zref0" "A" :validator pos?) => (throws ClassCastException)
-    (zref $c "/zref1" 1 :validator even?) => (throws IllegalStateException)))
+  (zref "/zref0" "A" :validator pos?) => (throws ClassCastException)
+  (zref "/zref1" 1 :validator even?) => (throws IllegalStateException))
+
+(fact "ZRefs can be watched"
+  (let [$z (zref "/myzref" "A")]
+    (add-watch $z :key (constantly true)) => $z
+    (remove-watch $z :key) => $z))
 
 (fact "Can dereference a fresh ZRef to obtain default value"
-  (with-open [$c (client (str connect-string sandbox))]
-    (zref $c "/myzref" "A")) => (refers-to "A"))
+  (zref "/myzref" "A") => (refers-to "A"))
 
 (fact "Can query a fresh ZRef to obtain initial metadata"
-  (with-open [$c (client (str connect-string sandbox))]
-    (let [$z (zref $c "/myzref" "A")]
-      (meta $z))) => (contains {:version 0 :ctime pos?}))
+  (let [$z (zref "/myzref" "A")]
+    (meta $z)) => (contains {:version -1}))
 
-(fact "Can update ZRef"
+(fact "Connecting a ZRef returns the ZRef"
   (with-open [$c (client (str connect-string sandbox))]
-    (let [$z (zref $c "/zref0" "A")]
+    (connect $c (zref "/myzref" "A"))) => (partial instance? roomkey.zref.ZRef))
+
+(fact "Connecting a ZRef in a virgin zookeeper creates the node with default data"
+  (with-open [$c (client (str connect-string sandbox))]
+    (connect $c (zref "/myzref" "A")) => anything)
+  (with-open [c (client (str connect-string sandbox))]
+    (zoo/data c "/myzref")) => (contains {:data (fn [x] (= "A" (#'roomkey.zref/deserialize x)))
+                                          :stat (contains {:version 0})}))
+
+(fact "Can update a connected ZRef"
+  (with-open [$c (client (str connect-string sandbox))]
+    (let [$z (connect $c (zref "/zref0" "A"))]
       (.compareVersionAndSet $z 0 "B") => true
       (.compareVersionAndSet $z 12 "C") => false)
-    (let [$z (zref $c "/zref1" "A")]
+    (let [$z (connect $c (zref "/zref1" "A"))]
       (compare-and-set! $z "Z" "B") => false
       (compare-and-set! $z "A" "B") => true
       (reset! $z "C") => "C")
-    (let [$z (zref $c "/zref2" 1)]
+    (let [$z (connect $c (zref "/zref2" 1))]
       (swap! $z inc) => 2
       ;; This next step requires that the watcher update the cache quickly.
       (swap! $z inc) => 3)))
 
-(fact "ZRefs can be watched"
+(fact "A connected ZRef is updated by changes at the cluster"
   (with-open [$c (client (str connect-string sandbox))]
-    (let [$z (zref $c "/myzref" "A")]
-      (add-watch $z :key (constantly true)) => $z
-      (remove-watch $z :key) => $z)))
-
-(fact "ZRef is updated by changes at the cluster"
-  (with-open [$c (client (str connect-string sandbox))]
-    (let [$z (zref $c "/myzref" "A")
+    (let [$z (connect $c (zref "/myzref" "A"))
           sync (promise)]
       (add-watch $z :sync (fn [& args] (deliver sync args)))
       (with-open [c (client (str connect-string sandbox))]
@@ -97,11 +101,15 @@
       @sync
       $z)) => (refers-to "B"))
 
-(fact "ZRef is updated by deletion at the cluster"
+(fact "A connected ZRef is updated by deletion at the cluster"
   (with-open [$c (client (str connect-string sandbox))]
-    (let [$z (zref $c "/myzref" "A")
+    (let [$z (connect $c (zref "/myzref" "A"))
           sync (promise)]
       (add-watch $z :sync (fn [& args] (deliver sync args)))
       (with-open [c (client (str connect-string sandbox))]
         (zoo/delete c "/myzref"))
       $z)) => (refers-to "A"))
+
+(fact "A disconnected ZRef cannot be updated"
+  (let [$z (zref "/myzref" "A")]
+    (.compareVersionAndSet $z 0 "B")) => (throws RuntimeException))
