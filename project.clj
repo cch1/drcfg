@@ -12,6 +12,7 @@
   :min-lein-version "2.5.0"
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [org.clojure/tools.logging "0.3.1"]
+                 [zookeeper-clj "0.9.1" :exclusions [org.apache.zookeeper/zookeeper]]
                  [org.apache.curator/curator-framework "3.1.0"]
                  [org.apache.curator/curator-recipes "3.1.0"]]
   :repositories [["rk-public" {:url "http://rk-maven-public.s3-website-us-east-1.amazonaws.com/releases/"}]
