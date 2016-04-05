@@ -131,7 +131,7 @@
     (try
       (zoo/create client "/" :persistent? true)
       (catch org.apache.zookeeper.KeeperException$NodeExistsException e
-        (log/infof "Root node exists at %s" cstr)))
+        (log/debugf "Root node exists at %s" cstr)))
     client))
 
 (defn connect
