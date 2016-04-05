@@ -74,7 +74,7 @@
   (with-open [$c (client (str connect-string sandbox))]
     (connect $c (zref "/myzref" "A")) => anything)
   (with-open [c (client (str connect-string sandbox))]
-    (zoo/data c "/myzref")) => (contains {:data (fn [x] (= "A" (#'roomkey.zref/deserialize x)))
+    (zoo/data c "/myzref")) => (contains {:data (fn [x] (= "A" (z/*deserialize* x)))
                                           :stat (contains {:version 0})}))
 
 (fact "Can update a connected ZRef"
@@ -97,8 +97,8 @@
           sync (promise)]
       (add-watch $z :sync (fn [& args] (deliver sync args)))
       (with-open [c (client (str connect-string sandbox))]
-        (zoo/set-data c "/myzref" (#'z/serialize "B") 0))
-      @sync
+        (zoo/set-data c "/myzref" (z/*serialize* "B") 0))
+      @sync => (just [:sync (partial instance? roomkey.zref.ZRef) "A" "B"])
       $z)) => (refers-to "B"))
 
 (fact "A connected ZRef is not updated by invalid values at the cluster"
@@ -107,11 +107,27 @@
           sync (promise)]
       (add-watch $z :sync (fn [& args] (deliver sync args)))
       (with-open [c (client (str connect-string sandbox))]
-        (zoo/set-data c "/myzref" (#'z/serialize 23) 0))
+        (zoo/set-data c "/myzref" (z/*serialize* 23) 0))
       (with-open [c (client (str connect-string sandbox))]
-        (zoo/set-data c "/myzref" (#'z/serialize "B") 1))
+        (zoo/set-data c "/myzref" (z/*serialize* "B") 1))
       @sync
       $z)) => (refers-to "B"))
+
+(fact "Children do not intefere with their parents"
+  (with-open [$c (client (str connect-string sandbox))]
+    (let [$zA (connect $c (zref "/myzref" "A" :validator string?))
+          $zB (connect $c (zref "/myzref/child" "B" :validator string?))
+          sync-a (promise)
+          sync-b (promise)]
+      (add-watch $zA :sync (fn [& args] (deliver sync-a args)))
+      (add-watch $zB :sync (fn [& args] (deliver sync-b args)))
+      (with-open [c (client (str connect-string sandbox))]
+        (zoo/set-data c "/myzref" (z/*serialize* "a") 0)
+        (zoo/set-data c "/myzref/child" (z/*serialize* "b") 0))
+      @sync-a => (just [:sync (partial instance? roomkey.zref.ZRef) "A" "a"])
+      @sync-b => (just [:sync (partial instance? roomkey.zref.ZRef) "B" "b"])
+      $zA => (refers-to "a")
+      $zB => (refers-to "b"))))
 
 (fact "A connected ZRef is updated by deletion at the cluster"
   (with-open [$c (client (str connect-string sandbox))]

@@ -8,9 +8,9 @@
 ;; https://github.com/liebke/zookeeper-clj
 ;; https://github.com/torsten/zookeeper-atom
 
-(defn- deserialize [b] (read-string (String. b "UTF-8")))
+(defn ^:dynamic *deserialize* [b] (read-string (String. b "UTF-8")))
 
-(defn- serialize [obj] (.getBytes (binding [*print-dup* true] (pr-str obj))))
+(defn ^:dynamic *serialize* [obj] (.getBytes (binding [*print-dup* true] (pr-str obj))))
 
 (defn- validate!
   [validator v]
@@ -42,7 +42,7 @@
       (log/debugf "Node %s exists")
       (do
         (log/debugf "Node %s does not exist, creating it and assigning default value" path)
-        (assert (zoo/create-all c path :data (-> cache deref :data) :persistent? true)
+        (assert (zoo/create-all c path :data (-> cache deref :data *serialize*) :persistent? true)
                 (format "Can't create node %s" path))))
     (reset! client c)
     (.zProcessUpdate this {:path path :event-type ::boot}))
@@ -56,10 +56,11 @@
       (log/infof "Node %s deleted" path)
       ([::boot nil] [:NodeDataChanged :SyncConnected]) ; two cases, identical behavior
       (when @client
-        (try (let [new-z (zoo/data @client path :watcher (fn [x] (.zProcessUpdate this x))) ; memfn?
+        (try (let [new-z (update (zoo/data @client path :watcher (fn [x] (.zProcessUpdate this x)))
+                                 :data *deserialize*) ; memfn?
                    old-z (deref cache)
-                   new-d (-> new-z :data deserialize)
-                   old-d (-> old-z :data deserialize)
+                   new-d (-> new-z :data)
+                   old-d (-> old-z :data)
                    new-v (-> new-z :stat :version)
                    old-v (-> old-z :stat :version)]
                (validate! @validator new-d)
@@ -75,7 +76,7 @@
       (log/warnf "Unexpected event:state [%s:%s] while watching %s" event-type keeper-state path))
     this)
   clojure.lang.IDeref
-  (deref [this] (-> cache deref :data deserialize))
+  (deref [this] (-> cache deref :data))
   clojure.lang.IMeta
   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_timeInZk
   (meta [this] (-> cache deref :stat))
@@ -94,7 +95,7 @@
   (compareVersionAndSet [this current-version newval]
     (when-not @client (throw (RuntimeException. "Not connected")))
     (validate! @validator newval)
-    (boolean (try (zoo/set-data @client path (serialize newval) current-version)
+    (boolean (try (zoo/set-data @client path (*serialize* newval) current-version)
                   (catch KeeperException e
                     (when-not (= (.code e) KeeperException$Code/BADVERSION)
                       (throw e))))))
@@ -103,13 +104,13 @@
   (compareAndSet [this oldval newval]
     (let [current @cache
           version (-> current :stat :version)]
-      (boolean (and (= oldval (-> current :data deserialize))
+      (boolean (and (= oldval (:data current))
                     (.compareVersionAndSet this version newval)))))
   (swap [this f]
     (loop [i 5]
       (assert (pos? i) (format "Too many failures updating %s" path))
       (let [current @cache
-            value (-> current :data deserialize f)
+            value (-> current :data f)
             version (-> current :stat :version)]
         (if (.compareVersionAndSet this version value) value (recur (dec i))))))
   (swap [this f x] (.swap this (fn [v] (f v x))))
@@ -119,7 +120,7 @@
 (defn zref
   [path default & options]
   (let [{validator :validator} (apply hash-map options)
-        z (ZRef. (atom nil) path (atom {:data (serialize default) :stat {:version -1}})
+        z (ZRef. (atom nil) path (atom {:data default :stat {:version -1}})
                  (atom validator) (atom {}))]
     (validate! validator default)
     z))
