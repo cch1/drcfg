@@ -119,11 +119,9 @@
 
 (defn zref
   [path default & options]
-  (let [{validator :validator} (apply hash-map options)
-        z (ZRef. (atom nil) path (atom {:data default :stat {:version -1}})
-                 (atom validator) (atom {}))]
+  (let [{validator :validator} (apply hash-map options)]
     (validate! validator default)
-    z))
+    (->ZRef (atom nil) path (atom {:data default :stat {:version -1}}) (atom validator) (atom {}))))
 
 (defn client
   [cstr]
@@ -137,3 +135,9 @@
 (defn connect
   [client z]
   (.zConnect z client))
+
+(defn connected?
+  [z]
+  (boolean (when-let [c @(.client z)] (.. c getState isConnected))))
+
+(defn path [z] (.path z))
