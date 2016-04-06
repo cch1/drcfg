@@ -8,9 +8,9 @@
 ;; https://github.com/liebke/zookeeper-clj
 ;; https://github.com/torsten/zookeeper-atom
 
-(defn ^:dynamic *deserialize* [b] (read-string (String. b "UTF-8")))
+(defn ^:dynamic *deserialize* [b] {:pre [(instance? (Class/forName "[B") b)]} (read-string (String. b "UTF-8")))
 
-(defn ^:dynamic *serialize* [obj] (.getBytes (binding [*print-dup* true] (pr-str obj))))
+(defn ^:dynamic *serialize* [obj] {:post [(instance? (Class/forName "[B") %)]} (.getBytes (binding [*print-dup* true] (pr-str obj))))
 
 (defn- validate!
   [validator v]
@@ -50,7 +50,7 @@
   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
   (zProcessUpdate [this {:keys [event-type keeper-state] path' :path}]
     (log/debugf "Change %s %s %s" path' event-type keeper-state)
-    (assert (= path path') (format "Got event for wrong path: %s : %s" path path'))
+    (assert (= path path') (format "ZNode at path %s got event (%s %s %s)" path path' event-type keeper-state))
     (case [event-type keeper-state]
       [:NodeDeleted :SyncConnected]
       (log/infof "Node %s deleted" path)
