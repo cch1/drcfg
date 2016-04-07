@@ -88,7 +88,6 @@
       (reset! $z "C") => "C")
     (let [$z (connect $c (zref "/zref2" 1))]
       (swap! $z inc) => 2
-      ;; This next step requires that the watcher update the cache quickly.
       (swap! $z inc) => 3)))
 
 (fact "A connected ZRef is updated by changes at the cluster"

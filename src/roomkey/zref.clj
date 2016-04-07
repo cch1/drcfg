@@ -12,6 +12,8 @@
 
 (defn ^:dynamic *serialize* [obj] {:post [(instance? (Class/forName "[B") %)]} (.getBytes (binding [*print-dup* true] (pr-str obj))))
 
+(def ^:dynamic *max-update-attempts* 50)
+
 (defn- validate!
   [validator v]
   (when validator
@@ -68,8 +70,8 @@
                (when (and (pos? old-v) (not= 1 (- new-v old-v)))
                  (log/warnf "Received non-sequential version [%d -> %d] for %s (%s %s)"
                             old-v new-v path event-type keeper-state))
-               (doseq [[k w] @watches] (try (w k this old-d new-d)
-                                            (catch Exception e (log/errorf e "Error in watcher %s" k)))))
+               (future (doseq [[k w] @watches] (try (w k this old-d new-d)
+                                              (catch Exception e (log/errorf e "Error in watcher %s" k))))))
              (catch Exception e
                (log/errorf e "Error processing inbound update from %s [%s]" path keeper-state))))
       ;; default
@@ -100,19 +102,25 @@
                     (when-not (= (.code e) KeeperException$Code/BADVERSION)
                       (throw e))))))
   clojure.lang.IAtom
-  (reset [this value] (.swap this (constantly value)))
+  (reset [this value] (.compareVersionAndSet this -1 value) value)
   (compareAndSet [this oldval newval]
     (let [current @cache
           version (-> current :stat :version)]
       (boolean (and (= oldval (:data current))
                     (.compareVersionAndSet this version newval)))))
   (swap [this f]
-    (loop [i 5]
-      (assert (pos? i) (format "Too many failures updating %s" path))
+    (loop [n 1 i *max-update-attempts*]
       (let [current @cache
             value (-> current :data f)
             version (-> current :stat :version)]
-        (if (.compareVersionAndSet this version value) value (recur (dec i))))))
+        (if (.compareVersionAndSet this version value)
+          value
+          (do
+            (when-not (pos? i) (throw (RuntimeException.
+                                       (format "Aborting update of %s after %d failures over ~%dms"
+                                               path *max-update-attempts* (* 2 n)))))
+            (Thread/sleep n)
+            (recur (* 2 n) (dec i)))))))
   (swap [this f x] (.swap this (fn [v] (f v x))))
   (swap [this f x y] (.swap this (fn [v] (f v x y))))
   (swap [this f x y args] (.swap this (fn [v] (apply f v x y args)))))
