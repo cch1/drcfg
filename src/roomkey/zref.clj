@@ -2,7 +2,6 @@
   "Dynamic Distributed Run-Time configuration"
   (:import [org.apache.zookeeper KeeperException KeeperException$Code])
   (:require [zookeeper :as zoo]
-            [clojure.string :as string]
             [clojure.tools.logging :as log]))
 
 ;; https://github.com/liebke/zookeeper-clj
