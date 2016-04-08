@@ -8,7 +8,7 @@
   (checker [actual] (extended-= (deref actual) expected)))
 
 (background (around :facts (binding [roomkey.drcfg/*client* (promise)
-                                     roomkey.drcfg/*registry* (ref #{})]
+                                     roomkey.drcfg/*registry* (atom #{})]
                              ?form)))
 
 (facts ">- returns a ZRef"

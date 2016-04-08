@@ -7,7 +7,7 @@
 ;;; USAGE:  see /roomkey/README.md
 
 (def ^:dynamic *client* (promise))
-(def ^:dynamic *registry* (ref #{}))
+(def ^:dynamic *registry* (atom #{}))
 (def zk-prefix "/drcfg")
 
 (defmacro ns-path [n]
@@ -62,7 +62,7 @@
     (add-watch z :logger (fn [k r o n] (log/debugf "Watched value of %s update: old: %s; new: %s" name o n)))
     (if (realized? *client*)
       (log/errorf "New drcfg reference %s defined after connect -- will not be linked to zookeeper" name)
-      (dosync (alter *registry* conj z zm)))
+      (swap! *registry* conj z zm))
     z))
 
 (defmacro def>-

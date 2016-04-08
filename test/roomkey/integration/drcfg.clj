@@ -55,7 +55,7 @@
                                 (zoo/delete-all *zc* sandbox)
                                 (with-redefs [roomkey.drcfg/zk-prefix sandbox] ; safety first
                                   (binding [roomkey.drcfg/*client* (promise)
-                                            roomkey.drcfg/*registry* (ref #{})]
+                                            roomkey.drcfg/*registry* (atom #{})]
                                     ?form
                                     (doseq [z @roomkey.drcfg/*registry*]
                                       (when (z/connected? z) (.zDisconnect z)))
