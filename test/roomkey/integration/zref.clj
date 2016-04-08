@@ -114,14 +114,14 @@
 
 (fact "Children do not intefere with their parents"
   (with-open [$c (client (str connect-string sandbox))]
-    (let [$zA (connect $c (zref "/myzref" "A" :validator string?))
-          $zB (connect $c (zref "/myzref/child" "B" :validator string?))
+    (let [$zB (connect $c (zref "/myzref/child" "B" :validator string?))
+          $zA (connect $c (zref "/myzref" "A" :validator string?))
           sync-a (promise)
           sync-b (promise)]
       (add-watch $zA :sync (fn [& args] (deliver sync-a args)))
       (add-watch $zB :sync (fn [& args] (deliver sync-b args)))
       (with-open [c (client (str connect-string sandbox))]
-        (zoo/set-data c "/myzref" (z/*serialize* "a") 0)
+        (zoo/set-data c "/myzref" (z/*serialize* "a") 1)
         (zoo/set-data c "/myzref/child" (z/*serialize* "b") 0))
       @sync-a => (just [:sync (partial instance? roomkey.zref.ZRef) "A" "a"])
       @sync-b => (just [:sync (partial instance? roomkey.zref.ZRef) "B" "b"])
@@ -140,3 +140,13 @@
 (fact "A disconnected ZRef cannot be updated"
   (let [$z (zref "/myzref" "A")]
     (.compareVersionAndSet $z 0 "B")) => (throws RuntimeException))
+
+(fact "A disconnected ZRef behaves"
+  (let [$z (zref "/myzref" "A")
+        sync (promise)]
+    (add-watch $z :sync (fn [& args] (deliver sync args)))
+    (with-open [$c (client (str connect-string sandbox))]
+      (connect $c $z)
+      @sync
+      (.zDisconnect $z)
+      @$z)) => "A")

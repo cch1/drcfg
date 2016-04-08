@@ -40,13 +40,18 @@
 (deftype ZRef [client path cache validator watches]
   UpdateableZNode
   (zConnect [this c]
-    (if (zoo/exists c path)
-      (log/debugf "Node %s exists")
-      (do
-        (log/debugf "Node %s does not exist, creating it and assigning default value" path)
-        (assert (zoo/create-all c path :data (-> cache deref :data *serialize*) :persistent? true)
-                (format "Can't create node %s" path))))
     (reset! client c)
+    (let [{v :version l :dataLength :as stat} (zoo/exists c path)]
+      (when (or (nil? stat) (and (zero? l) (zero? v)))
+        (let [d (.deref this)]
+          (if stat
+            (do
+              (log/infof "Updating degenerate node %s with default value" path)
+              (assert (.compareVersionAndSet this v d) "Can't update degenerate node"))
+            (do
+              (log/debugf "Node %s does not exist, creating it and assigning default value" path)
+              (assert (zoo/create-all c path :data (-> d *serialize*) :persistent? true)
+                      (format "Can't create node %s" path)))))))
     (.zProcessUpdate this {:path path :event-type ::boot}))
   (zDisconnect [this] (reset! client nil))
   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
