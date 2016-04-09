@@ -148,6 +148,10 @@
   [client z]
   (.zConnect z client))
 
+(defn disconnect
+  [z]
+  (.zDisconnect z))
+
 (defn connected?
   [z]
   (boolean (when-let [c @(.client z)] (.. c getState isConnected))))
