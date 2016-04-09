@@ -9,8 +9,8 @@
 
 (background (around :facts (binding [roomkey.drcfg/*registry* (atom #{})] ?form)))
 
-(facts ">- returns a ZRef"
-  (>- "/ns/x" 1) => (refers-to 1)
+(facts ">- returns a pair of ZRefs"
+  (>- "/ns/x" 1) => (just [(refers-to 1) (refers-to nil)])
   (provided
     (z/zref "/ns/x" 1) => (atom 1)
     (z/zref "/ns/x/.metadata" nil) => (atom nil))

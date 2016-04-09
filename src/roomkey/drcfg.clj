@@ -57,13 +57,13 @@
   including leading slash and namespace) and default value and record it for
   future connecting"
   [name default & options]
-  {:pre [(re-matches #"/.+" name)] :post [(instance? clojure.lang.IRef %)]}
+  {:pre [(re-matches #"/.+" name)] :post [(every? (partial instance? clojure.lang.IRef) %)]}
   (let [{m :meta :as o} (apply hash-map options)
         z (apply z/zref name default (mapcat identity (select-keys o [:validator])))
         zm (z/zref (str name "/.metadata") m)]
     (add-watch z :logger (fn [k r o n] (log/debugf "Watched value of %s update: old: %s; new: %s" name o n)))
     (swap! *registry* conj z zm)
-    z))
+    [z zm]))
 
 (defmacro def>-
   "Def a config reference with the given atom, using the atom name as the
@@ -72,4 +72,4 @@
   leaving the old values stored in zookeeper orphaned and reverting to defaults."
   [name default & options]
   (let [nstr (str name)]
-    `(def ~name (>- (ns-path ~nstr) ~default ~@options))))
+    `(def ~name (first (>- (ns-path ~nstr) ~default ~@options)))))
