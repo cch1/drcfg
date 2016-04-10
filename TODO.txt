@@ -1,0 +1,3 @@
+At zDisconnect, use removeWatches on client for path of zref -requies dumping more of zookeeper-clj
+Use more default client startup behavior (read-only flag, async return) -requires dumping more of zookeeper-clj
+echo wchp | nc 127.0.0.1 2181 | grep drcfg | sort

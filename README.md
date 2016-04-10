@@ -1,7 +1,8 @@
 # roomkey
 
-This library contains utilities for RoomKey's SSTJ partner plugins and
-shared config interfaces (drcfg) for various RoomKey projects.
+This library provides a distributed run-time configuation capability.  The primary abstraction is
+the *ZRef*, which is analagous to Clojure's atom but supports a distributed data persistence layer
+through the use of Apache Zookeeper.
 
 ## Repository Owner
 Chris Hapgood
@@ -9,11 +10,47 @@ chapgood@roomkey.com
 
 ## License
 
-Copyright (C) 2013 RoomKey
+Copyright (C) 2016 RoomKey
 
 ## drcfg notes
 
-### new drcfg vs old
+### Design Objectives
+1. Provide a run-time distributed data element -the ZRef.
+2. To the extent possible, implement the interfaces of Clojure's own atom on a ZRef.
+   
+   clojure.lang.IDeref
+	   * deref : complete support.  Note that the read interface may lag successful writes.
+   clojure.lang.IMeta
+	   * meta : complete support, the metadata returned is the stat data structure from Zookeeper
+   clojure.lang.IRef
+	   * setValidator : complete support.  Validation is performed on inbound reads and outbound writes.
+	   * getValidator : complete support
+	   * getWatches : complete support
+	   * addWatch : complete support
+	   * removeWatch : partial support.  A watch may trigger one time after being removed.
+   clojure.lang.IAtom
+	   * reset : full support
+	   * compareAndSet : full support.  Note that the implementation actually requries a version match
+	   as well as a value match.
+	   * swap : partial support.  A swap operation may fail if there is too much contention on the node
+	   at the cluster.
+   roomkey.zref.Versionedupdate
+	   * compareVersionAndSet - similar to `compareAndSet` but requiring a version match in the store
+	   to effect an update.
+   roomkey.zref.UpdateableZNode
+	   * zConnect - start synchronization of the local ZRef with the corresponding Zookeeper node
+	   * zDisconnect - stop synchronization.
+	   * zProcessUpdate - process an inbound update from the cluster
+	   
+   3. Expose the Zookeeper version through metadata on the ZRef.
+   4. Support classic arbitrary metadata through an auxilliary ZRef (stored a child path `.metadata`)
+
+### Monitoring/Admin
+http://zookeeper.apache.org/doc/r3.5.1-alpha/zookeeperAdmin.html#sc_zkCommands
+
+### Support libraries
+
+The current version of drcfg has dropped curator in favor of [https://github.com/liebke/zookeeper-clj](zookeeper-clj)
 
 The old drcfg used avout to manage the backing zookeeper store. The
 new drcfg implementation stores values in zookeeper directly (with
@@ -50,88 +87,71 @@ functions are defined in roomkey.zkutil.
 
 drcfg also creates a .metadata zookeeper node under the defined node
 containing any metadata (hopefully, including a doc string as
-described below). This metadata map is visible in adminsuite and is
-intended to help explain the significance of the variables without
-requiring an admin user to go hunting through code to see how it is
-used.
+described below).
 
 ### drcfg usage
 
-For basic usage, the calling app simply needs to use drcfg's def>-
-macro to def the atom that will hold the config value and provide a
-default. The atom name is automatically prepended with the *ns* value
+For basic usage, the calling app simply needs to use drcfg's `def>-`
+macro to def the ZRef that will hold the config value and provide a
+default. The atom name is automatically prepended with the `*ns*` value
 when used in this way.
 
 If a corresponding node is found in zookeeper, the application's atom
 will reflect the value from this node. If no existing node exists,
 then a new node is created for the variable and the default value is
-stored there. In this case, the application's atom will reflect the
-default value.
+stored there..
 
 A watch is applied to the node so that if the zookeeper value is
 updated while the application that referenced it is still running, the
-application's atom will be automatically updated to reflect the new
+application's ZRef will be automatically updated to reflect the new
 value.
+
+ZRefs can be updated in the same fashion as Clojure's own atom.  Updates
+are written *synchronously* to the cluster.
 
 ### drcfg sample code
 
 ```
 (ns (your project)
-  (:use [roomkey.drcfg :as drcfg]))
+  (:require [roomkey.drcfg :as drcfg]))
 
- ;; basic usage (with optional validation)
-  (drcfg/def>- yourvariable "default-value" :validator string?
-    :meta {:doc "Description of your variable here.  Should be descriptive
+;; basic usage (with optional validation)
+(drcfg/def>- yourvariable "default-value" :validator string?
+	:meta {:doc "Description of your variable here.  Should be descriptive
 enough to allow an ops user to know what your variable does when they
 see it in adminsuite."})
 
- ;; immediately after the def>-, your variable has the default value
- @yourvariable
- ;; returns=> "default-value"
+;; immediately after the def>-, your variable has the default value
+@yourvariable
+;; returns=> "default-value"
 
- ;; hosts is a comma separated list of zookeeper hosts including port 
- ;; or 'localhost:2181' for local dev.  The calling application 
- ;; will typically get it from the ZK_HOSTS environment variable
- (defn- zk-connect! []
-  (when-let [hosts (or (System/getProperty "ZK_HOSTS")
+;; hosts is a comma separated list of zookeeper hosts including port 
+;; or 'localhost:2181' for local dev.  The calling application 
+;; will typically get it from the ZK_HOSTS environment variable
+(defn- zk-connect! []
+	(when-let [hosts (or (System/getProperty "ZK_HOSTS")
                        (get (System/getenv) "ZK_HOSTS")
                        (System/getProperty "PARAM2")
                        (get {:development "localhost:2181"} (stage/stage)))]
     (drcfg/connect! hosts)))
 
- ;; dereferencing your variable provides the latest value.  Note that 
- ;; while def>- and connect! return immediately, it can take a second
- ;; or so for the linked variables to have the zookeeper value
- @yourvariable
- ;; returns=> "whatever-value-was-in-zookeeper" or "default-value" if
- ;; this is a new node
+;; dereferencing your variable provides the latest value.  Note that 
+;; while def>- and connect! return immediately, it can take a second
+;; or so for the linked variables to have the zookeeper value
+@yourvariable
+;; returns=> "whatever-value-was-in-zookeeper" or "default-value" if
+;; this is a new node
 
- ;; if you need to update the value stored in zookeeper, use 'drset!'
- ;; after connecting. drset! requires the namespaced path (e.g.
- ;; '/your.namespace/yourvariable' to the variable instead of just the
- ;; variable name. You can use drcfg/ns-path to generate this assuming
- ;; you are updating a variable within your own namespace. The
- ;; rationale here is to allow updates of variables in other
- ;; namespaces.
- (drcfg/drset! (drcfg/ns-path 'yourvariable') "new-value")
+;; if you need to update the value stored in zookeeper, use conventional
+;; clojure commands for updating an atom (swap!, reset!, compare-and-set!)
+;; after connecting.
 
- ;; within a second or two after an update, all atoms referencing that
- ;; value, across the distributed environment should be updated
- @yourvariable
- ;; returns=> "new-value"
-
- ;; there is an alternative usage pattern in which you use a returned
- ;; atom instead of passing one in yourself. This can be useful in
- ;; 'let' scenarios, but it is important to note that in this case,
- ;; you must use the namespaced path (e.g.
- ;; '/your.namespace/yourvariable') or wrap your variable name in a 
- ;; call to ns-path
- (let [yourlocalvar (drcfg/>- (drcfg/ns-path 'yourvariable)' "default-value"
-                              :validator string?)]
- 	(println @yourlocalvar))
+;; within a second or two after an update, all atoms referencing that
+;; value, across the distributed environment should be updated
+@yourvariable
+;; returns=> "new-value"
 
 ```
-
 ### avoiding incessant logging from curator and zookeeper
 
 Zookeeper really, really wants your requests to zookeeper to get where
