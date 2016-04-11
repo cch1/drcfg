@@ -17,6 +17,7 @@ Copyright (C) 2016 RoomKey
 ### Design Objectives
 1. Provide a run-time distributed data element -the ZRef.
 2. To the extent possible, implement the interfaces of Clojure's own atom on a ZRef.
+   
    clojure.lang.IDeref
 	   * deref : complete support.  Note that the read interface may lag successful writes.
    clojure.lang.IMeta
@@ -37,11 +38,12 @@ Copyright (C) 2016 RoomKey
 	   * compareVersionAndSet - similar to `compareAndSet` but requiring a version match in the store
 	   to effect an update.
    roomkey.zref.UpdateableZNode
-	   * zConnect - start synchronization of the local ZRef with the corresponding Zookeeper node.
+	   * zConnect - start synchronization of the local ZRef with the corresponding Zookeeper node
 	   * zDisconnect - stop synchronization.
-	   * zProcessUpdate - process an inbound update from the cluster.
-3. Expose the Zookeeper version through metadata on the ZRef.
-4. Support classic arbitrary metadata through an auxilliary ZRef (stored a child path `.metadata`)
+	   * zProcessUpdate - process an inbound update from the cluster
+	   
+   3. Expose the Zookeeper version through metadata on the ZRef.
+   4. Support classic arbitrary metadata through an auxilliary ZRef (stored a child path `.metadata`)
 
 ### Monitoring/Admin
 http://zookeeper.apache.org/doc/r3.5.1-alpha/zookeeperAdmin.html#sc_zkCommands
@@ -50,13 +52,38 @@ http://zookeeper.apache.org/doc/r3.5.1-alpha/zookeeperAdmin.html#sc_zkCommands
 
 The current version of drcfg has dropped curator in favor of [https://github.com/liebke/zookeeper-clj](zookeeper-clj)
 
+The old drcfg used avout to manage the backing zookeeper store. The
+new drcfg implementation stores values in zookeeper directly (with
+some help from the Netflix Curator library)
+
+A few differences in the new drcfg implementation:
+
+* in the old drcfg, it was necessary to create the root /drcfg code
+  via direct zookeeper calls if it did not already exist. In new
+  drcfg, any necessary directories are automatically created in the
+  node structure.
+
+* in the old drcfg, the only way to set values in zookeeper was to use
+  update!. In new drcfg, if no node exists in zookeeper, then the
+  structure will be created and the default value from the def>- call
+  will be stored there.
+
+* update! has been renamed to drset! since update implies different
+  behavior in clojure
+
+* in the old drcfg, if def>- came after connect it would continue
+  silently without warning that it was not properly linked. In drcfg,
+  an exception is thrown if def>- is called after connect. An option
+  is available to override this exception, but that is expected only
+  to be used for drcfg integration tests.
+
 ### drcfg zookeeper namespace
 
-drcfg stores values in zookeeper at the path /drcfg/scope/*ns*/varname where
-`scope` is an optional scope "directory" and *ns* is the namespace of the
-module that defines the var. Values are
+drcfg stores values in zookeeper at the path /drcfg/*ns*/varname where
+*ns* is the namespace of the module that defines the var. Values are
 serialized by clojure (print-dup) with the resulting string converted
-to a byte array for storage in zookeeper.
+to a byte array for storage in zookeeper. The serialize/deserialize
+functions are defined in roomkey.zkutil.
 
 drcfg also creates a .metadata zookeeper node under the defined node
 containing any metadata (hopefully, including a doc string as
