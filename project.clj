@@ -12,7 +12,8 @@
   :min-lein-version "2.5.0"
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [org.clojure/tools.logging "0.3.1"]
-                 [zookeeper-clj "0.9.4" :exclusions [org.apache.zookeeper/zookeeper]]]
+                 [zookeeper-clj "0.9.4" :exclusions [org.apache.zookeeper/zookeeper]]
+                 [org.apache.zookeeper/zookeeper "3.5.1-alpha"]]
   :repositories [["rk-public" {:url "http://rk-maven-public.s3-website-us-east-1.amazonaws.com/releases/"}]
                  ["releases" {:url "s3://rk-maven/releases/"}]]
   :jvm-opts ["-Djava.io.tmpdir=./tmp"]
