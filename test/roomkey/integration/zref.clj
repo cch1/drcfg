@@ -150,3 +150,16 @@
       @sync
       (.zDisconnect $z)
       @$z)) => "A")
+
+(fact "Disconnected servers are reconnected"
+  (with-open [s (TestingServer. true)]
+    (let [z (zref "/myzref" "A")]
+      (with-open [c (client (str (.getConnectString s) "/sandbox"))]
+        (connect c z)
+        (.restart s)
+        (Thread/sleep 1000) ; a watch on the client would remove this silliness
+        (let [p (promise)]
+          (add-watch z :sync (fn [& args] (deliver p args)))
+          (reset! z "B")
+          (deref p))
+        z))) => (refers-to "B") )

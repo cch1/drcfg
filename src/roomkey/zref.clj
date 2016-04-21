@@ -56,10 +56,10 @@
   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
   (zProcessUpdate [this {:keys [event-type keeper-state] path' :path}]
     (log/debugf "Change %s %s %s" path' event-type keeper-state)
-    (assert (= path path') (format "ZNode at path %s got event (%s %s %s)" path path' event-type keeper-state))
     (case [event-type keeper-state]
-      [:NodeDeleted :SyncConnected]
-      (log/infof "Node %s deleted" path)
+      [:None :SyncConnected] (log/debugf "Connected (%s)" path)
+      [:None :Disconnected] (log/debugf "Disconnected (%s)" path)
+      [:NodeDeleted :SyncConnected] (log/infof "Node %s deleted" path)
       ([::boot nil] [:NodeDataChanged :SyncConnected]) ; two cases, identical behavior
       (when-let [c @client]
         (try (let [new-z (update (zoo/data c path :watcher (fn [x] (.zProcessUpdate this x)))
