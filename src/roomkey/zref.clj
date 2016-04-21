@@ -61,8 +61,8 @@
       [:NodeDeleted :SyncConnected]
       (log/infof "Node %s deleted" path)
       ([::boot nil] [:NodeDataChanged :SyncConnected]) ; two cases, identical behavior
-      (when @client
-        (try (let [new-z (update (zoo/data @client path :watcher (fn [x] (.zProcessUpdate this x)))
+      (when-let [c @client]
+        (try (let [new-z (update (zoo/data c path :watcher (fn [x] (.zProcessUpdate this x)))
                                  :data *deserialize*) ; memfn?
                    old-z (deref cache)
                    new-d (-> new-z :data)
