@@ -61,23 +61,32 @@
       [:None :Disconnected] (log/debugf "Disconnected (%s)" path)
       [:NodeDeleted :SyncConnected] (log/infof "Node %s deleted" path)
       ([::boot nil] [:NodeDataChanged :SyncConnected]) ; two cases, identical behavior
-      (when-let [c @client]
-        (try (let [new-z (update (zoo/data c path :watcher (fn [x] (.zProcessUpdate this x)))
-                                 :data *deserialize*) ; memfn?
-                   old-z (deref cache)
-                   new-d (-> new-z :data)
-                   old-d (-> old-z :data)
-                   new-v (-> new-z :stat :version)
-                   old-v (-> old-z :stat :version)]
-               (validate! @validator new-d)
-               (reset! cache new-z)
-               (when (and (pos? old-v) (not= 1 (- new-v old-v)))
-                 (log/warnf "Received non-sequential version [%d -> %d] for %s (%s %s)"
-                            old-v new-v path event-type keeper-state))
-               (future (doseq [[k w] @watches] (try (w k this old-d new-d)
-                                              (catch Exception e (log/errorf e "Error in watcher %s" k))))))
-             (catch Exception e
-               (log/errorf e "Error processing inbound update from %s [%s]" path keeper-state))))
+      (do
+        (assert (= path path') (format "ZNode at path %s got event (%s %s %s)" path path' event-type keeper-state))
+        (when-let [c @client]
+          (try
+            (let [new-z (update (zoo/data c path :watcher (fn [x] (.zProcessUpdate this x)))
+                                :data *deserialize*) ; memfn?
+                  old-z (deref cache)
+                  new-d (-> new-z :data)
+                  old-d (-> old-z :data)
+                  new-v (-> new-z :stat :version)
+                  old-v (-> old-z :stat :version)]
+              (validate! @validator new-d)
+              (reset! cache new-z)
+              (let [delta (- new-v old-v)]
+                (cond
+                  (neg? delta) (log/warnf "Received negative version delta [%d -> %d] for %s (%s %s)"
+                                      old-v new-v path event-type keeper-state)
+                  (zero? delta) (log/infof "Received zero version delta [%d -> %d] for %s (%s %s)"
+                                       old-v new-v path event-type keeper-state)
+                  (and (pos? old-v) (> delta 1))
+                  (log/infof "Received non-sequential version delta [%d -> %d] for %s (%s %s)"
+                             old-v new-v path event-type keeper-state)))
+              (future (doseq [[k w] @watches] (try (w k this old-d new-d)
+                                                   (catch Exception e (log/errorf e "Error in watcher %s" k))))))
+            (catch Exception e
+              (log/errorf e "Error processing inbound update from %s [%s]" path keeper-state)))))
       ;; default
       (log/warnf "Unexpected event:state [%s:%s] while watching %s" event-type keeper-state path))
     this)

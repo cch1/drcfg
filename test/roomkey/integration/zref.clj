@@ -151,7 +151,7 @@
       (.zDisconnect $z)
       @$z)) => "A")
 
-(fact "Disconnected servers are reconnected"
+(fact "Disconnected ZRefs are reconnected"
   (with-open [s (TestingServer. true)]
     (let [z (zref "/myzref" "A")]
       (with-open [c (client (str (.getConnectString s) "/sandbox"))]
@@ -162,8 +162,23 @@
           (add-watch z :sync (fn [& args] (deliver p args)))
           (reset! z "B")
           (deref p))
-        z))) => (refers-to "B") )
+        z))) => (refers-to "B"))
 
 (fact "Missing parent nodes throw meaningful exceptions"
   (with-open [test-server (TestingServer. true)]
     (client (str (.getConnectString test-server) "/sandbox/drcfg"))) => (throws clojure.lang.ExceptionInfo))
+
+(fact "Non-sequential version updates are OK"
+  (with-open [s (TestingServer. true)]
+    (let [z0 (zref "/myzref" "A")
+          z1 (zref "/myzref" "A")]
+      (with-open [c0 (client (str (.getConnectString s) "/sandbox"))]
+        (connect c0 z0)
+        (reset! z0 "B")
+        (disconnect z0))
+      (with-open [c1 (client (str (.getConnectString s) "/sandbox"))]
+        (connect c1 z1)
+        (reset! z1 "C")
+        (reset! z1 "D")
+        (connect c1 z0)
+        z0)) => (refers-to "D")))
