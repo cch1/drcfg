@@ -163,3 +163,7 @@
           (reset! z "B")
           (deref p))
         z))) => (refers-to "B") )
+
+(fact "Missing parent nodes throw meaningful exceptions"
+  (with-open [test-server (TestingServer. true)]
+    (client (str (.getConnectString test-server) "/sandbox/drcfg"))) => (throws clojure.lang.ExceptionInfo))

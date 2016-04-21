@@ -141,7 +141,10 @@
     (try
       (zoo/create client "/" :persistent? true)
       (catch org.apache.zookeeper.KeeperException$NodeExistsException e
-        (log/debugf "Root node exists at %s" cstr)))
+        (log/debugf "Root node exists at %s" cstr))
+      (catch org.apache.zookeeper.KeeperException$NoNodeException e
+        (log/warnf "Can't create root node for connect string %s -does our parent node exist?" cstr)
+        (throw (ex-info "The drcfg root node could not be created" {:connect-string cstr} e))))
     client))
 
 (defn connect
