@@ -38,34 +38,6 @@
   (with-open [$c (client connect-string)]
     (zoo/exists $c sandbox)) => truthy)
 
-(fact "Can create a ZRef"
-  (zref "/myzref" "A") => (partial instance? roomkey.zref.ZRef))
-
-(fact "A validator can be added"
-  (let [$z (zref "/zref0" 1)]
-    (set-validator! $z odd?) => nil?
-    (get-validator $z) => (exactly odd?)))
-
-(fact "New validators must validate current value"
-  (let [$z (zref "/zref0" 1)]
-    (set-validator! $z even?) => (throws IllegalStateException)))
-
-(fact "Default values must validate"
-  (zref "/zref0" "A" :validator pos?) => (throws ClassCastException)
-  (zref "/zref1" 1 :validator even?) => (throws IllegalStateException))
-
-(fact "ZRefs can be watched"
-  (let [$z (zref "/myzref" "A")]
-    (add-watch $z :key (constantly true)) => $z
-    (remove-watch $z :key) => $z))
-
-(fact "Can dereference a fresh ZRef to obtain default value"
-  (zref "/myzref" "A") => (refers-to "A"))
-
-(fact "Can query a fresh ZRef to obtain initial metadata"
-  (let [$z (zref "/myzref" "A")]
-    (meta $z)) => (contains {:version -1}))
-
 (fact "Connecting a ZRef returns the ZRef"
   (with-open [$c (client (str connect-string sandbox))]
     (connect $c (zref "/myzref" "A"))) => (partial instance? roomkey.zref.ZRef))
@@ -136,10 +108,6 @@
       (with-open [c (client (str connect-string sandbox))]
         (zoo/delete c "/myzref"))
       $z)) => (refers-to "A"))
-
-(fact "A disconnected ZRef cannot be updated"
-  (let [$z (zref "/myzref" "A")]
-    (.compareVersionAndSet $z 0 "B")) => (throws RuntimeException))
 
 (fact "A disconnected ZRef behaves"
   (let [$z (zref "/myzref" "A")

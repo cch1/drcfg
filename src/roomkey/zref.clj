@@ -28,13 +28,21 @@
 ;;;    current value AND current version.
 ;;;  * The swap operation can fail if there is too much contention for a znode.
 
-(defprotocol VersionedUpdate
-  (compareVersionAndSet [this current-version new-value]))
-
 (defprotocol UpdateableZNode
   (zConnect [this client] "Using the given client, enable updates and start the watcher")
   (zDisconnect [this] "Disassociate the client and disable updates")
   (zProcessUpdate [this new-zdata] "Process the zookeeper update and return this (the znode)"))
+
+(defprotocol VersionedUpdate
+  (compareVersionAndSet [this current-version new-value]))
+
+(defprotocol VersionedDeref
+ (vDeref [this]))
+
+(defprotocol VersionedWatch
+ (vGetWatches [this])
+ (vAddWatch [this k f])
+ (vRemoveWatch [this k]))
 
 (deftype ZRef [client path cache validator watches]
   UpdateableZNode
@@ -65,13 +73,12 @@
         (assert (= path path') (format "ZNode at path %s got event (%s %s %s)" path path' event-type keeper-state))
         (when-let [c @client]
           (try
-            (let [new-z (update (zoo/data c path :watcher (fn [x] (.zProcessUpdate this x)))
+            (let [f (juxt :data (comp :version :stat))
+                  new-z (update (zoo/data c path :watcher (fn [x] (.zProcessUpdate this x)))
                                 :data *deserialize*) ; memfn?
                   old-z (deref cache)
-                  new-d (-> new-z :data)
-                  old-d (-> old-z :data)
-                  new-v (-> new-z :stat :version)
-                  old-v (-> old-z :stat :version)]
+                  [old-d old-v :as o] (f old-z)
+                  [new-d new-v :as n] (f new-z)]
               (validate! @validator new-d)
               (reset! cache new-z)
               (let [delta (- new-v old-v)]
@@ -83,29 +90,14 @@
                   (and (pos? old-v) (> delta 1))
                   (log/infof "Received non-sequential version delta [%d -> %d] for %s (%s %s)"
                              old-v new-v path event-type keeper-state)))
-              (future (doseq [[k w] @watches] (try (w k this old-d new-d)
+              (future (doseq [[k w] @watches] (try (w k this o n)
                                                    (catch Exception e (log/errorf e "Error in watcher %s" k))))))
             (catch Exception e
               (log/errorf e "Error processing inbound update from %s [%s]" path keeper-state)))))
       ;; default
       (log/warnf "Unexpected event:state [%s:%s] while watching %s" event-type keeper-state path))
     this)
-  clojure.lang.IDeref
-  (deref [this] (-> cache deref :data))
-  clojure.lang.IMeta
-  ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_timeInZk
-  (meta [this] (-> cache deref :stat))
-  ;; Observe Interface
-  clojure.lang.IRef
-  (setValidator [this f]
-    (validate! f (.deref this))
-    (reset! validator f)
-    this)
-  (getValidator [this] @validator)
-  (getWatches [this] @watches)
-  (addWatch [this k f] (swap! watches assoc k f) this)
-  (removeWatch [this k] (swap! watches dissoc k) this)
-  ;; Write interface
+
   VersionedUpdate
   (compareVersionAndSet [this current-version newval]
     (when-not @client (throw (RuntimeException. "Not connected")))
@@ -114,20 +106,43 @@
                   (catch KeeperException e
                     (when-not (= (.code e) KeeperException$Code/BADVERSION)
                       (throw e))))))
+  VersionedDeref
+  (vDeref [this] ((juxt :data (comp :version :stat)) @cache))
+
+  VersionedWatch
+  (vGetWatches [this] @watches)
+  (vAddWatch [this k f] (swap! watches assoc k f) this)
+  (vRemoveWatch [this k] (swap! watches dissoc k) this)
+
+  clojure.lang.IMeta
+  ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_timeInZk
+  (meta [this] (-> (.cache this) deref :stat))
+
+  clojure.lang.IDeref
+  (deref [this] (-> (.vDeref this) first))
+
+  clojure.lang.IRef
+  (setValidator [this f]
+    (validate! f (.deref this))
+    (reset! validator f)
+    this)
+  (getValidator [this] @validator)
+  (getWatches [this] (.vGetWatches this))
+  (addWatch [this k f] (.vAddWatch this k (fn [k r [o ov] [n nv]] (f k r o n))))
+  (removeWatch [this k] (.vRemoveWatch this k))
+
   clojure.lang.IAtom
   (reset [this value] (.compareVersionAndSet this -1 value) value)
   (compareAndSet [this oldval newval]
-    (let [current @cache
-          version (-> current :stat :version)]
-      (boolean (and (= oldval (:data current))
+    (let [[value version] (.vDeref this)]
+      (boolean (and (= oldval value)
                     (.compareVersionAndSet this version newval)))))
   (swap [this f]
     (loop [n 1 i *max-update-attempts*]
-      (let [current @cache
-            value (-> current :data f)
-            version (-> current :stat :version)]
-        (if (.compareVersionAndSet this version value)
-          value
+      (let [[value version] (.vDeref this)
+            value' (f value)]
+        (if (.compareVersionAndSet this version value')
+          value'
           (do
             (when-not (pos? i) (throw (RuntimeException.
                                        (format "Aborting update of %s after %d failures over ~%dms"
@@ -140,9 +155,10 @@
 
 (defn zref
   [path default & options]
-  (let [{validator :validator} (apply hash-map options)]
-    (validate! validator default)
-    (->ZRef (atom nil) path (atom {:data default :stat {:version -1}}) (atom validator) (atom {}))))
+  (let [{validator :validator} (apply hash-map options)
+        z (->ZRef (atom nil) path (atom {:data default :stat {:version -1}}) (atom nil) (atom {}))]
+    (when validator (.setValidator z validator))
+    z))
 
 (defn client
   [cstr]
