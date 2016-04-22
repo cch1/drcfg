@@ -67,7 +67,8 @@
     (case [event-type keeper-state]
       [:None :SyncConnected] (log/debugf "Connected (%s)" path)
       [:None :Disconnected] (log/debugf "Disconnected (%s)" path)
-      [:NodeDeleted :SyncConnected] (log/infof "Node %s deleted" path)
+      [:None :Expired] (log/debugf "Expired (%s)" path)
+      [:NodeDeleted :SyncConnected] (log/warnf "Node %s deleted" path)
       ([::boot nil] [:NodeDataChanged :SyncConnected]) ; two cases, identical behavior
       (do
         (assert (= path path') (format "ZNode at path %s got event (%s %s %s)" path path' event-type keeper-state))
@@ -128,7 +129,7 @@
     this)
   (getValidator [this] @validator)
   (getWatches [this] (.vGetWatches this))
-  (addWatch [this k f] (.vAddWatch this k (fn [k r [o ov] [n nv]] (f k r o n))))
+  (addWatch [this k f] (.vAddWatch this k (fn [k r [o _] [n _]] (f k r o n))))
   (removeWatch [this k] (.vRemoveWatch this k))
 
   clojure.lang.IAtom
