@@ -40,14 +40,14 @@
                            (z/connect c z)))
      (vary-meta registry assoc ::client c))))
 
-(defn connect-with-wait!
+(defn ^:deprecated connect-with-wait!
   "Initiate a connection to the zookeeper service and link all previously
   defined local references, waiting for the connection and linkage to complete
   before returning"
   [hosts & [scope]]
   (swap! *registry* start hosts scope))
 
-(defn connect!
+(defn ^:deprecated connect!
   "Return a future representing the blocking connect-with-wait!"
   [hosts & [scope]]
   (future (connect-with-wait! hosts scope)))

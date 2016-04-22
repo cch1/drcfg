@@ -1,3 +1,11 @@
 At zDisconnect, use removeWatches on client for path of zref -requies dumping more of zookeeper-clj
 Use more default client startup behavior (read-only flag, async return) -requires dumping more of zookeeper-clj
-echo wchp | nc 127.0.0.1 2181 | grep drcfg | sort
+Overhaul startup
+ * accept an existing client
+ * Don't stick client into registry's metadata (blech!)
+ * Scrap extra scope (just prefix w/ "drcfg", and make that a configurable default)
+ * Remove `connect!` and `connect-with-wait!`
+ * Let `>-` not automatically update registry (but preserve that behavior in `def>-`) -or at least offer the
+   possibility of creating the drcfg stuff with a "bring your own state" option.
+Move reporting to separate namespace
+ * Use this to get used zrefs: echo wchp | nc 127.0.0.1 2181 | grep drcfg | sort
