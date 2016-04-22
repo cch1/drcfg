@@ -40,7 +40,6 @@
  (vDeref [this]))
 
 (defprotocol VersionedWatch
- (vGetWatches [this])
  (vAddWatch [this k f])
  (vRemoveWatch [this k]))
 
@@ -111,7 +110,6 @@
   (vDeref [this] ((juxt :data (comp :version :stat)) @cache))
 
   VersionedWatch
-  (vGetWatches [this] @watches)
   (vAddWatch [this k f] (swap! watches assoc k f) this)
   (vRemoveWatch [this k] (swap! watches dissoc k) this)
 
@@ -128,7 +126,7 @@
     (reset! validator f)
     this)
   (getValidator [this] @validator)
-  (getWatches [this] (.vGetWatches this))
+  (getWatches [this] @watches)
   (addWatch [this k f] (.vAddWatch this k (fn [k r [o _] [n _]] (f k r o n))))
   (removeWatch [this k] (.vRemoveWatch this k))
 
