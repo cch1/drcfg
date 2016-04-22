@@ -1,5 +1,5 @@
 (ns roomkey.zref
-  "Dynamic Distributed Run-Time configuration"
+  "A Zookeeper-based reference type"
   (:import [org.apache.zookeeper KeeperException KeeperException$Code])
   (:require [zookeeper :as zoo]
             [clojure.tools.logging :as log]))
@@ -27,21 +27,21 @@
 ;;;  * The compare-and-set semantics are tightened to insist that updates can only apply to the
 ;;;    current value AND current version.
 ;;;  * The swap operation can fail if there is too much contention for a znode.
-
+;;;  * Simple watcher functions are wrapped to ignore the version parameter applied to full-fledged watchers.
 (defprotocol UpdateableZNode
   (zConnect [this client] "Using the given client, enable updates and start the watcher")
   (zDisconnect [this] "Disassociate the client and disable updates")
   (zProcessUpdate [this new-zdata] "Process the zookeeper update and return this (the znode)"))
 
 (defprotocol VersionedUpdate
-  (compareVersionAndSet [this current-version new-value]))
+  (compareVersionAndSet [this current-version new-value] "Set to new-value only when current-version is latest"))
 
 (defprotocol VersionedDeref
- (vDeref [this]))
+ (vDeref [this] "Return referenced value and version"))
 
 (defprotocol VersionedWatch
- (vAddWatch [this k f])
- (vRemoveWatch [this k]))
+  "A protocol for adding versioned watchers using the same associative storage as \"classic\" watchers"
+ (vAddWatch [this k f] "Add versioned watcher that will be called with new value and version"))
 
 (deftype ZRef [client path cache validator watches]
   UpdateableZNode
@@ -111,7 +111,6 @@
 
   VersionedWatch
   (vAddWatch [this k f] (swap! watches assoc k f) this)
-  (vRemoveWatch [this k] (swap! watches dissoc k) this)
 
   clojure.lang.IMeta
   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_timeInZk
@@ -128,7 +127,7 @@
   (getValidator [this] @validator)
   (getWatches [this] @watches)
   (addWatch [this k f] (.vAddWatch this k (fn [k r [o _] [n _]] (f k r o n))))
-  (removeWatch [this k] (.vRemoveWatch this k))
+  (removeWatch [this k] (swap! watches dissoc k) this)
 
   clojure.lang.IAtom
   (reset [this value] (.compareVersionAndSet this -1 value) value)
@@ -158,6 +157,34 @@
         z (->ZRef (atom nil) path (atom {:data default :stat {:version -1}}) (atom nil) (atom {}))]
     (when validator (.setValidator z validator))
     z))
+
+(defn versioned-deref
+  "Return the current state (value and version) of the zref `z`."
+  [z]
+  {:pre [(instance? roomkey.zref.ZRef z)]}
+  (.vDeref z))
+
+(defn compare-version-and-set!
+  "Atomically sets the value of z to `newval` if and only if the current
+  version of `z` is identical to `current-version`. Returns true if set
+  happened, else false"
+  [z current-version newval]
+  {:pre [(instance? roomkey.zref.ZRef z) (integer? current-version)]}
+  (.compareVersionAndSet z current-version newval))
+
+(defn add-versioned-watch
+  "Adds a watch function to the zref z.  The watch fn must be a fn of 4 args:
+  the key, the zref, its old-state and its new-state. Whenever the zref's
+  state might have been changed, any registered watches will have their
+  functions called.  Note that the zref's state may have changed again
+  prior to the fn call, so use old/new-state rather than derefing the zref.
+  Note also that watch fns may be called from multiple threads
+  simultaneously.  Keys must be unique per zref, and can be used to remove
+  the watch with `remove-watch`, but are otherwise considered opaque
+  by the watch mechanism."
+  [z k f]
+  {:pre [(instance? roomkey.zref.ZRef z) (fn? f)]}
+  (.vAddWatch z k f))
 
 (defn client
   [cstr]
