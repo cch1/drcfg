@@ -65,8 +65,8 @@
     (log/debugf "Change %s %s %s" path' event-type keeper-state)
     (case [event-type keeper-state]
       [:None :SyncConnected] (log/debugf "Connected (%s)" path)
-      [:None :Disconnected] (log/debugf "Disconnected (%s)" path)
-      [:None :Expired] (log/debugf "Expired (%s)" path)
+      [:None :Disconnected] (log/infof "Disconnected (%s)" path)
+      [:None :Expired] (log/warnf "Expired (%s)" path)
       [:NodeDeleted :SyncConnected] (log/warnf "Node %s deleted" path)
       ([::boot nil] [:NodeDataChanged :SyncConnected]) ; two cases, identical behavior
       (do
