@@ -63,12 +63,10 @@
   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
   (zProcessUpdate [this {:keys [event-type keeper-state] path' :path}]
     (log/debugf "Change %s %s %s" path' event-type keeper-state)
-    (case [event-type keeper-state]
-      [:None :SyncConnected] (log/debugf "Connected (%s)" path)
-      [:None :Disconnected] (log/infof "Disconnected (%s)" path)
-      [:None :Expired] (log/warnf "Expired (%s)" path)
-      [:NodeDeleted :SyncConnected] (log/warnf "Node %s deleted" path)
-      ([::boot nil] [:NodeDataChanged :SyncConnected]) ; two cases, identical behavior
+    (case event-type
+      :None (log/debugf "Event %s (%s)" event-type path)
+      :NodeDeleted (log/warnf "Node %s deleted" path)
+      (::boot :NodeDataChanged) ; two cases, identical behavior
       (do
         (assert (= path path') (format "ZNode at path %s got event (%s %s %s)" path path' event-type keeper-state))
         (when-let [c @client]
@@ -85,8 +83,8 @@
                 (cond
                   (neg? delta) (log/warnf "Received negative version delta [%d -> %d] for %s (%s %s)"
                                       old-v new-v path event-type keeper-state)
-                  (zero? delta) (log/infof "Received zero version delta [%d -> %d] for %s (%s %s)"
-                                       old-v new-v path event-type keeper-state)
+                  (zero? delta) (log/debugf "Received zero version delta [%d -> %d] for %s (%s %s)"
+                                        old-v new-v path event-type keeper-state)
                   (and (pos? old-v) (> delta 1))
                   (log/infof "Received non-sequential version delta [%d -> %d] for %s (%s %s)"
                              old-v new-v path event-type keeper-state)))
