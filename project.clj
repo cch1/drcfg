@@ -18,7 +18,7 @@
                  ["releases" {:url "s3://rk-maven/releases/"}]]
   :jvm-opts ["-Djava.io.tmpdir=./tmp"]
   :profiles {:dev {:dependencies [[midje "1.8.3" :exclusions [commons-codec]]
-                                  [org.apache.curator/curator-test "3.1.0"]
+                                  [org.apache.curator/curator-test "3.2.0"]
                                   [org.slf4j/slf4j-api "1.7.21"]
                                   [org.slf4j/jcl-over-slf4j "1.7.21"]
                                   [org.slf4j/slf4j-log4j12 "1.7.21"]
