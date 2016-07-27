@@ -1,9 +1,9 @@
 (ns roomkey.zclient
-  "A resilient Zookeeper client"
+  "A resilient and respawning Zookeeper client"
   (:import [org.apache.zookeeper ZooKeeper Watcher WatchedEvent
             Watcher$Event$EventType Watcher$Event$KeeperState
             KeeperException KeeperException$Code])
-  (:require [zookeeper :as zoo]
+  (:require [clojure.core.async :as async]
             [clojure.tools.logging :as log]))
 
 (defn- swap*!
@@ -20,18 +20,20 @@
   (close [this] "Close the connection")
   (renew [this] "Renew the connection"))
 
-(deftype TransientClient [connect-string zc]
+(deftype ZClient [connect-string zc c]
   Connectable
+  ;; TODO: allow parameterization of ZooKeeper instantiation
   (open [this]
     (let [new (ZooKeeper. connect-string (int 1000) this (boolean true))
           new (swap! zc (fn [old]
-                          (assert (nil? old) "Can't open already opened TransientClient")
+                          (assert (nil? old) "Can't open already opened ZClient")
                           new))])
     this)
   (close [this]
     (let [old (swap*! zc (fn [old]
-                           (assert old "Can't close unopened TransientClient")
+                           (assert old "Can't close unopened ZClient")
                            nil))]
+      (async/close! c)
       (.close old))
     this)
   (renew [this]
@@ -46,22 +48,18 @@
     (let [ev (keyword (.name (.getState event)))]
       (log/debugf "ZK %s %s (%s)" ev (keyword (.name (.getType event))) (.getPath event))
       (case ev
-        (:Unknown :NoSyncConnected) (log/warnf "[ZK %s] Received deprecated event: %s" @zc ev)
-        :ConnectedReadOnly (log/infof "[ZK %s] Connected Read Only @ %s" @zc connect-string)
-        :AuthFailed (log/infof "[ZK %s] SASL Authentication Failed @ %s" @zc connect-string)
-        :Expired (do (log/warnf "Session Expired!") (.renew this))
-        ;; :SyncConnected (log/debugf "[ZK %5s] Connected @ %s" @zc connect-string)
-        ;; :SaslAuthenticated (log/debugf "[ZK %s] SASL Authenticated" @zc)
-        ;; :Disconnected (log/debugf "[ZK %s] Disconnected from server @ %s" @zc connect-string)
-        nil)))
-  clojure.lang.IDeref
-  (deref [this] @zc)
-  clojure.lang.IRef
-  (setValidator [this f]
-    (throw (RuntimeException. "Validators are not supported by TransientClient")))
-  (getValidator [this] (constantly true))
-  (getWatches [this] (.getWatches zc))
-  (addWatch [this k f] (.addWatch zc k f) this)
-  (removeWatch [this k] (.removeWatch zc k) this))
+        :AuthFailed (log/warnf "[ZK %s] SASL Authentication Failed @ %s" @zc connect-string)
+        :SaslAuthenticated (log/infof "[ZK %s] SASL Authenticated" @zc)
+        :ConnectedReadOnly (async/go (async/>! c [ev @zc]))
+        :SyncConnected (async/go (async/>! c [ev @zc]))
+        :Disconnected (async/go (async/>! c [ev @zc]))
+        :Expired (do (log/warnf "Session Expired!") (async/go (async/>! c [ev @zc])) (.renew this))
+        (:Unknown :NoSyncConnected) (throw (Exception. (format "Deprecated event: %s") ev))
+        (throw (Exception. (format "Unexpected event: %s") ev))))))
 
-(defn create [cstr] (->TransientClient cstr (atom nil)))
+;; TODO: Ensure root node exists
+;; TODO: Track cversion of root node for a sort of heartbeat
+;; TODO: shutdown on channel close and event arriving and dispense with close
+(defn create [cstr c]
+  {:pre [(string? cstr)]}
+  (.open (->ZClient cstr (atom nil) c)))

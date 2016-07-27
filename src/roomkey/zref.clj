@@ -2,6 +2,7 @@
   "A Zookeeper-based reference type"
   (:import [org.apache.zookeeper KeeperException KeeperException$Code])
   (:require [zookeeper :as zoo]
+            [clojure.string :as string]
             [clojure.tools.logging :as log]))
 
 ;; https://github.com/liebke/zookeeper-clj
@@ -19,6 +20,16 @@
     (when-not (validator v)
       (throw (IllegalStateException. "Invalid reference state")))))
 
+(defn create-all
+  "Create a node and all of its parents, but without the race conditions."
+  [client path]
+  (loop [result-path "" [dir & children] (rest (string/split path #"/"))]
+    (let [result-path (str result-path "/" dir)
+          created? (zoo/create client result-path :persistent? true)]
+      (if-not (seq children)
+        created?
+        (recur result-path children)))))
+
 ;;; A Reference type persisted in a zookeeper cluster.  The semantics are similar to a Clojure Atom
 ;;; with the following major differences:
 ;;;  * The read state (accessed via deref) may lag successful write operations (e.g. swap!)
@@ -29,8 +40,10 @@
 ;;;  * The swap operation can fail if there is too much contention for a znode.
 ;;;  * Simple watcher functions are wrapped to ignore the version parameter applied to full-fledged watchers.
 (defprotocol UpdateableZNode
-  (zConnect [this client] "Using the given client, enable updates and start the watcher")
-  (zDisconnect [this] "Disassociate the client and disable updates")
+  (zPair [this client] "Associate with the given client")
+  (zConnect [this] "Start online operations")
+  (zDisconnect [this] "Suspend online operations")
+  (zInitialize [this] "Ensure that the ZNode exists and contains a value")
   (zProcessUpdate [this new-zdata] "Process the zookeeper update and return this (the znode)"))
 
 (defprotocol VersionedUpdate
@@ -43,32 +56,36 @@
   "A protocol for adding versioned watchers using the same associative storage as \"classic\" watchers"
  (vAddWatch [this k f] "Add versioned watcher that will be called with new value and version"))
 
-(deftype ZRef [client path cache validator watches]
+(deftype ZRef [client connected? path cache validator watches]
   UpdateableZNode
-  (zConnect [this c]
-    (reset! client c)
-    (let [{v :version l :dataLength :as stat} (zoo/exists c path)]
-      (when (or (nil? stat) (and (zero? l) (zero? v)))
-        (let [d (.deref this)]
-          (if stat
-            (do
-              (log/infof "Updating degenerate node %s with default value" path)
-              (assert (.compareVersionAndSet this v d) "Can't update degenerate node"))
-            (do
-              (log/debugf "Node %s does not exist, creating it and assigning default value" path)
-              (assert (zoo/create-all c path :data (-> d *serialize*) :persistent? true)
-                      (format "Can't create node %s" path)))))))
-    (.zProcessUpdate this {:path path :event-type ::boot}))
-  (zDisconnect [this] (reset! client nil))
+  (zPair [this c] (reset! client c) this)
+  (zConnect [this]
+    (reset! connected? true)
+    (.zProcessUpdate this {:path path :event-type ::Boot :keeper-state nil})
+    this)
+  (zDisconnect [this]
+    (reset! connected? false)
+    this)
+  (zInitialize [this]
+    (when-let [c @client]
+      (let [d (.deref this)]
+        (when (create-all c path)
+          (log/debugf "Created node %s" path))
+        (when (.compareVersionAndSet this 0 d)
+          (log/infof "Updated initial node %s with default value" path))
+        this)))
   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
+  ;; https://www.safaribooksonline.com/library/view/zookeeper/9781449361297/ch04.html
   (zProcessUpdate [this {:keys [event-type keeper-state] path' :path}]
     (log/debugf "Change %s %s %s" path' event-type keeper-state)
     (case event-type
-      :None (log/debugf "Event %s (%s)" event-type path)
+      :None (do (log/debugf "Keeper State event: %s (%s)" keeper-state path)  ; session changes
+                (assert (nil? path') "Keeper State event received with a path"))
       :NodeDeleted (log/warnf "Node %s deleted" path)
-      (::boot :NodeDataChanged) ; two cases, identical behavior
+      (:NodeDataChanged ::Boot)
       (do
-        (assert (= path path') (format "ZNode at path %s got event (%s %s %s)" path path' event-type keeper-state))
+        (assert (= path path')
+                (format "ZNode at path %s got event (%s %s %s)" path path' event-type keeper-state))
         (when-let [c @client]
           (try
             (let [f (juxt :data (comp :version :stat))
@@ -88,22 +105,24 @@
                   (and (pos? old-v) (> delta 1))
                   (log/infof "Received non-sequential version delta [%d -> %d] for %s (%s %s)"
                              old-v new-v path event-type keeper-state)))
-              (future (doseq [[k w] @watches] (try (w k this o n)
-                                                   (catch Exception e (log/errorf e "Error in watcher %s" k))))))
+              (future (doseq [[k w] @watches]
+                        (try (w k this o n)
+                             (catch Exception e (log/errorf e "Error in watcher %s" k))))))
             (catch Exception e
-              (log/errorf e "Error processing inbound update from %s [%s]" path keeper-state)))))
+              (log/errorf e "Error processing inbound update for %s [%s]" path event-type)))))
       ;; default
       (log/warnf "Unexpected event:state [%s:%s] while watching %s" event-type keeper-state path))
     this)
 
   VersionedUpdate
   (compareVersionAndSet [this current-version newval]
-    (when-not @client (throw (RuntimeException. "Not connected")))
     (validate! @validator newval)
-    (boolean (try (zoo/set-data @client path (*serialize* newval) current-version)
-                  (catch KeeperException e
-                    (when-not (= (.code e) KeeperException$Code/BADVERSION)
-                      (throw e))))))
+    (if-let [client @client]
+      (boolean (try (zoo/set-data client path (*serialize* newval) current-version)
+                    (catch KeeperException e
+                      (when-not (= (.code e) KeeperException$Code/BADVERSION)
+                        (throw e)))))
+      (throw (RuntimeException. "Not connected"))))
   VersionedDeref
   (vDeref [this] ((juxt :data (comp :version :stat)) @cache))
 
@@ -132,11 +151,12 @@
   (compareAndSet [this oldval newval]
     (let [[value version] (.vDeref this)]
       (boolean (and (= oldval value)
-                    (.compareVersionAndSet this version newval)))))
+                  (.compareVersionAndSet this version newval)))))
   (swap [this f]
     (loop [n 1 i *max-update-attempts*]
       (let [[value version] (.vDeref this)
             value' (f value)]
+        (log/debugf "Swapping %s for %s (@%d)" value value' version)
         (if (.compareVersionAndSet this version value')
           value'
           (do
@@ -152,7 +172,8 @@
 (defn zref
   [path default & options]
   (let [{validator :validator} (apply hash-map options)
-        z (->ZRef (atom nil) path (atom {:data default :stat {:version -1}}) (atom nil) (atom {}))]
+        z (->ZRef (atom nil) (atom false) path (atom {:data default :stat {:version -1}})
+                 (atom nil) (atom {}))]
     (when validator (.setValidator z validator))
     z))
 
@@ -183,29 +204,3 @@
   [z k f]
   {:pre [(instance? roomkey.zref.ZRef z) (fn? f)]}
   (.vAddWatch z k f))
-
-(defn client
-  [cstr]
-  (let [client (zoo/connect cstr)]
-    (try
-      (zoo/create client "/" :persistent? true)
-      (catch org.apache.zookeeper.KeeperException$NodeExistsException e
-        (log/debugf "Root node exists at %s" cstr))
-      (catch org.apache.zookeeper.KeeperException$NoNodeException e
-        (log/warnf "Can't create root node for connect string %s -does our parent node exist?" cstr)
-        (throw (ex-info "The drcfg root node could not be created" {:connect-string cstr} e))))
-    client))
-
-(defn connect
-  [client z]
-  (.zConnect z client))
-
-(defn disconnect
-  [z]
-  (.zDisconnect z))
-
-(defn connected?
-  [z]
-  (boolean (when-let [c @(.client z)] (.. c getState isConnected))))
-
-(defn path [z] (.path z))
