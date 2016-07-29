@@ -24,10 +24,10 @@
   Connectable
   ;; TODO: allow parameterization of ZooKeeper instantiation
   (open [this]
-    (let [new (ZooKeeper. connect-string (int 1000) this (boolean true))
-          new (swap! zc (fn [old]
-                          (assert (nil? old) "Can't open already opened ZClient")
-                          new))])
+    (let [new (ZooKeeper. connect-string (int 1000) this (boolean true))]
+      (swap! zc (fn [old]
+                  (assert (nil? old) "Can't open already opened ZClient")
+                  new)))
     this)
   (close [this]
     (let [old (swap*! zc (fn [old]
