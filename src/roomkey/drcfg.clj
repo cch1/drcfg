@@ -37,6 +37,8 @@
         (.zDisconnect z)
         (log/debugf "Client input channel has closed for %s, shutting down" (.path z))))))
 
+;; TODO: Ensure root node exists
+;; TODO: Track cversion of root node for a sort of heartbeat
 (defn open
   ([registry hosts] (open registry hosts nil))
   ([registry hosts scope]
@@ -61,8 +63,7 @@
 
 (defn >-
   "Create a config reference with the given name (must be fully specified,
-  including leading slash and namespace) and default value and record it for
-  future connecting"
+  including leading slash) and default value and record it for future connecting"
   [name default & options]
   {:pre [(re-matches #"/.+" name)] :post [(every? (partial instance? clojure.lang.IRef) %)]}
   (let [{m :meta :as o} (apply hash-map options)
@@ -73,10 +74,10 @@
     [z zm]))
 
 (defmacro def>-
-  "Def a config reference with the given atom, using the atom name as the
-  leaf name, and automatically prepending the namespace to determine the
-  zookeeper path.  NB: when refactoring, note that the namespace may change,
-  leaving the old values stored in zookeeper orphaned and reverting to defaults."
+  "Def a config reference with the given name.  The current namespace will be
+  automatically prepended to create the zookeeper path -when refactoring, note
+  that the namespace may change, leaving the old values stored in zookeeper
+  orphaned and reverting to the default value."
   [name default & options]
   (let [nstr (str name)]
     `(def ~name (first (>- (ns-path ~nstr) ~default ~@options)))))

@@ -22,8 +22,7 @@
 
 (deftype ZClient [connect-string zc c]
   Connectable
-  ;; TODO: allow parameterization of ZooKeeper instantiation
-  (open [this]
+  (open [this] ; TODO: allow parameterization of ZooKeeper instantiation
     (let [new (ZooKeeper. connect-string (int 1000) this (boolean true))]
       (swap! zc (fn [old]
                   (assert (nil? old) "Can't open already opened ZClient")
@@ -38,7 +37,6 @@
     this)
   (renew [this]
     (let [new (ZooKeeper. connect-string (int 1000) this (boolean true))
-          ;; TODO: Is this where we should try to renew any existing session?
           old (swap*! zc (constantly new))]
       (.close old))
     this)
@@ -57,8 +55,6 @@
         (:Unknown :NoSyncConnected) (throw (Exception. (format "Deprecated event: %s") ev))
         (throw (Exception. (format "Unexpected event: %s") ev))))))
 
-;; TODO: Ensure root node exists
-;; TODO: Track cversion of root node for a sort of heartbeat
 ;; TODO: shutdown on channel close and event arriving and dispense with close
 (defn create [cstr c]
   {:pre [(string? cstr)]}
