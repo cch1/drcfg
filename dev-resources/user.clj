@@ -51,7 +51,7 @@
 ;; Use public drcfg vars
 (defn ex2 []
   (binding [roomkey.drcfg/*registry* (atom #{})]
-    (let [[r rm] (>- "/" nil)
-          [z zm] (>- $path {})]
+    (let [r (>- "/" nil)
+          z (>- $path {})]
       (with-open [c (open @roomkey.drcfg/*registry* $connect-string)]
         (comment >break!)))))

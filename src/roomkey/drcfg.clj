@@ -65,13 +65,11 @@
   "Create a config reference with the given name (must be fully specified,
   including leading slash) and default value and record it for future connecting"
   [name default & options]
-  {:pre [(re-matches #"/.+" name)] :post [(every? (partial instance? clojure.lang.IRef) %)]}
-  (let [{m :meta :as o} (apply hash-map options)
-        z (apply z/zref name default (mapcat identity (select-keys o [:validator])))
-        zm (z/zref (str name "/.metadata") m)]
-    (add-watch z :logger (fn [k r o n] (log/debugf "Watched value of %s update: old: %s; new: %s" name o n)))
-    (swap! *registry* conj z zm) ; TODO: Move this to def>- with deprecation notice
-    [z zm]))
+  {:pre [] :post [(instance? clojure.lang.IRef %)]}
+  (let [z (apply z/zref name default options)]
+    (add-watch z :logger (fn [k r o n] (log/tracef "Value of %s update: old: %s; s" name o n)))
+    (swap! *registry* conj z)
+    z))
 
 (defmacro def>-
   "Def a config reference with the given name.  The current namespace will be
@@ -79,5 +77,10 @@
   that the namespace may change, leaving the old values stored in zookeeper
   orphaned and reverting to the default value."
   [name default & options]
-  (let [nstr (str name)]
-    `(def ~name (first (>- (ns-path ~nstr) ~default ~@options)))))
+  (let [nstr (str name)
+        {m :meta :as o} (apply hash-map options)]
+    `(def ~name (let [bpath# (ns-path ~nstr)
+                      bref# (apply >- bpath# ~default (mapcat identity
+                                                              (select-keys (hash-map ~@options) [:validator])))]
+                  (when ~m (>- (str bpath# "/.metadata") ~m))
+                  bref#))))

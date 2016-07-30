@@ -10,12 +10,11 @@
 
 (background (around :facts (binding [roomkey.drcfg/*registry* (atom #{})] ?form)))
 
-(facts ">- returns a pair of ZRefs"
-  (>- "/ns/x" 1) => (just [(refers-to 1) (refers-to nil)])
+(facts ">- returns a ZRefs"
+  (>- "/ns/x" 1) => (refers-to 1)
   (provided
-    (z/zref "/ns/x" 1) => (atom 1)
-    (z/zref "/ns/x/.metadata" nil) => (atom nil))
-  *registry* => (refers-to (just #{(refers-to 1) (refers-to nil)})))
+    (z/zref "/ns/x" 1) => (atom 1))
+  *registry* => (refers-to (just #{(refers-to 1)})))
 
 (fact "open starts zrefs with client specs"
   (open [..zRef1.. ..zRef2..] "cspecs") => ..client..
