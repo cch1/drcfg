@@ -40,6 +40,7 @@
 ;; TODO: Ensure root node exists
 ;; TODO: Track cversion of root node for a sort of heartbeat
 (defn open
+  ([hosts] (open (deref *registry*) hosts))
   ([registry hosts] (open registry hosts nil))
   ([registry hosts scope]
    (let [ch-source (async/chan)
