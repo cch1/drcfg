@@ -1,164 +1,143 @@
-# roomkey
+# drcfg
 
-This library provides a distributed run-time configuation capability.  The primary abstraction is
+This [Clojure](http://www.clojure.org) library provides a distributed run-time configuation capability.  The primary abstraction is
 the *ZRef*, which is analagous to Clojure's atom but supports a distributed data persistence layer
-through the use of Apache Zookeeper.
+through the use of [Apache Zookeeper](http://zookeeper.apache.org/).
 
 ## Repository Owner
-Chris Hapgood
-chapgood@roomkey.com
+[Chris Hapgood](mailto:chapgood@roomkey.com)
 
 ## License
 
-Copyright (C) 2016 RoomKey
+Copyright (C) 2016 [RoomKey](http://www.roomkey.com)
 
 ## drcfg notes
 
 ### Design Objectives
 1. Provide a run-time distributed data element -the ZRef.
-2. To the extent possible, implement the interfaces of Clojure's own atom on a ZRef.
-   
-   clojure.lang.IDeref
-	   * deref : complete support.  Note that the read interface may lag successful writes.
-   clojure.lang.IMeta
-	   * meta : complete support, the metadata returned is the stat data structure from Zookeeper
-   clojure.lang.IRef
-	   * setValidator : complete support.  Validation is performed on inbound reads and outbound writes.
-	   * getValidator : complete support
-	   * getWatches : complete support
-	   * addWatch : complete support
-	   * removeWatch : partial support.  A watch may trigger one time after being removed.
-   clojure.lang.IAtom
-	   * reset : full support
-	   * compareAndSet : full support.  Note that the implementation actually requries a version match
-	   as well as a value match.
-	   * swap : partial support.  A swap operation may fail if there is too much contention on the node
-	   at the cluster.
-   roomkey.zref.Versionedupdate
-	   * compareVersionAndSet - similar to `compareAndSet` but requiring a version match in the store
-	   to effect an update.
-   roomkey.zref.UpdateableZNode
-	   * zConnect - start synchronization of the local ZRef with the corresponding Zookeeper node
-	   * zDisconnect - stop synchronization.
-	   * zProcessUpdate - process an inbound update from the cluster
-	   
-   3. Expose the Zookeeper version through metadata on the ZRef.
-   4. Support classic arbitrary metadata through an auxilliary ZRef (stored a child path `.metadata`)
+2. Provide high resiliency -including reasonable operation when no zookeeper node is available at all (such as airplane mode).
+3. To the extent possible, implement the interfaces of Clojure's own atom on a ZRef:
+4. Expose the Zookeeper [stat](https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_zkStatStructure) data through metadata on the ZRef (and the "versioned" protocols)
+5. Support arbitrary metadata through an auxilliary ZRef (stored in a child path `.metadata`)
+6. Avoid the weight of additional support libraries such as [Apache Curator](https://curator.apache.org/) while still providing client resiliency and rollover.
+
+### About the drcfg zookeeper node namespace
+
+When using the `def>-` macro, drcfg stores values in zookeeper at the path `/drcfg/<*ns*>/<varname>` where `*ns*` is the namespace of the module that defines the var.
+
+When using the `def>-` macro, drcfg will also creates a `.metadata` zookeeper node under the defined node containing any metadata (hopefully including a doc string as described below).  If no metadata is provided, the node is not created.
+
+### drcfg usage
+
+For basic usage, the calling app simply needs to use drcfg's `def>-` like this:
+
+``` Clojure
+(ns my.name.space
+  (:require [roomkey.drcfg :refer [def>-]]))
+
+(def>- myz "default" :validator? string?)
+```
+
+This will create a var whose value is a ZRef associated with the ZooKeeper node `/drcfg/my.name.space/myz`.  Until a connection to the ZooKeeper cluster is established, dereferencing `myz` will yield the default value:
+
+    @myz => "default"
+
+and the metadata on the ZRef (not the var) will be truncated:
+
+	(meta myz) => {:verison -1}
+
+At some later time, the application should open a connection to the ZooKeeper cluster so that ZRefs can be updated with their persisted values:
+
+``` Clojure
+(ns my.init
+  (:require [roomkey.drcfg :as drcfg]))
+
+(def zclient (atom nil))
+
+(reset! zclient (drcfg/open "zk1.my.co:2181,zk2.my.co:2181,zk3.my.co:2181"))
+```
+
+This will create a `ZClient` ZooKeeper client (which is stored in `zclient`) and open a connection to the specified ZooKeeper cluster.  Upon connection, all previously created ZRefs will be linked to their cooresponding ZooKeeper nodes.  The client should be retained for eventual cleanup.  Note that the prefix `"drcfg"` is automatically added to the provided ZooKeeper connection string.
+
+During linking, if not already set, a default value of `"default"` will be set on the node `/drcfg/my.name.space/myz`.  If the node already has a value set (e.g. `"foo"`), it will update the ZRef, causing subsequent dereferencing to yield the updated value:
+
+	@myz => "foo"
+
+Metadata too is updated:
+
+	(meta myz) => {:dataLength 5, :numChildren 1, :pzxid 64, :aversion 0, :ephemeralOwner 0, :cversion 1, :ctime 1412349368172, :czxid 63, :mzxid 4295232539, :version 6, :mtime 1469675813189}
+
+From this point on, a ZooKeeper watch is kept on the associated node and any updates will be reflected in `myz`.
+
+When the application shuts down, you should release resources associated with the previously created ZClient:
+
+	(.close @zclient)
+
+Note that the opening and closing of the ZClient can be neatly managed by state management tools from Clojure's `with-open` through complete systems like [component](https://github.com/stuartsierra/component).
+
+#### Writes
+ZRefs can be updated in the same fashion as Clojure's own atom.  Updates are written *synchronously* to the cluster.  See the section below on protocols for enhanced usage with versioning semantics.
+
+### Dependencies
+
+The current version of drcfg has dropped Apache Curator in favor of direct use of the [official java ZooKeeper library](http://zookeeper.apache.org/releases.html#download) and [zookeeper-clj](https://github.com/liebke/zookeeper-clj).  In addition, Clojure's [core.async](https://clojure.github.io/core.async/index.html) is used to manage communication of connectivity events between a ZRef and its ZClient.
+
+### Global State
+The `def>-` macro (obviously) adds a var to the current namespace.  If you prefer to create a local binding to a ZRef, you can use the `roomkey.drcfg/>-` function.
+
+In addition to creating the var, the `def>-` macro and `>-` function adds their ZRef value to, `roomkey.drcfg/*registry*`, a set of ZRefs that should be linked to their corrsponding nodes when a connection to the ZooKeeper cluster is established.  This state is required because `def>-` is intended to be used in top-level forms in Clojure code, **and** because the connection to a ZooKeeper cluster is unlikely to be established at that time, it is important to track the ZRefs for eventual connection later in the application's startup.  If you prefer to manage the linking of ZRefs to ZClients yourself, the `roomkey.drcfg/open` command has an arity that allows the developer to supply a collection of ZRefs.
 
 ### Monitoring/Admin
 http://zookeeper.apache.org/doc/r3.5.1-alpha/zookeeperAdmin.html#sc_zkCommands
 
-### Support libraries
-
-The current version of drcfg has dropped curator in favor of [https://github.com/liebke/zookeeper-clj](zookeeper-clj)
-
-The old drcfg used avout to manage the backing zookeeper store. The
-new drcfg implementation stores values in zookeeper directly (with
-some help from the Netflix Curator library)
-
-A few differences in the new drcfg implementation:
-
-* in the old drcfg, it was necessary to create the root /drcfg code
-  via direct zookeeper calls if it did not already exist. In new
-  drcfg, any necessary directories are automatically created in the
-  node structure.
-
-* in the old drcfg, the only way to set values in zookeeper was to use
-  update!. In new drcfg, if no node exists in zookeeper, then the
-  structure will be created and the default value from the def>- call
-  will be stored there.
-
-* update! has been renamed to drset! since update implies different
-  behavior in clojure
-
-* in the old drcfg, if def>- came after connect it would continue
-  silently without warning that it was not properly linked. In drcfg,
-  an exception is thrown if def>- is called after connect. An option
-  is available to override this exception, but that is expected only
-  to be used for drcfg integration tests.
-
-### drcfg zookeeper namespace
-
-drcfg stores values in zookeeper at the path /drcfg/*ns*/varname where
-*ns* is the namespace of the module that defines the var. Values are
-serialized by clojure (print-dup) with the resulting string converted
-to a byte array for storage in zookeeper. The serialize/deserialize
-functions are defined in roomkey.zkutil.
-
-drcfg also creates a .metadata zookeeper node under the defined node
-containing any metadata (hopefully, including a doc string as
-described below).
-
-### drcfg usage
-
-For basic usage, the calling app simply needs to use drcfg's `def>-`
-macro to def the ZRef that will hold the config value and provide a
-default. The atom name is automatically prepended with the `*ns*` value
-when used in this way.
-
-If a corresponding node is found in zookeeper, the application's atom
-will reflect the value from this node. If no existing node exists,
-then a new node is created for the variable and the default value is
-stored there..
-
-A watch is applied to the node so that if the zookeeper value is
-updated while the application that referenced it is still running, the
-application's ZRef will be automatically updated to reflect the new
-value.
-
-ZRefs can be updated in the same fashion as Clojure's own atom.  Updates
-are written *synchronously* to the cluster.
-
-### drcfg sample code
-
+``` bash
+echo wchp | nc 127.0.0.1 2181 | grep drcfg | sort
 ```
-(ns (your project)
-  (:require [roomkey.drcfg :as drcfg]))
 
-;; basic usage (with optional validation)
-(drcfg/def>- yourvariable "default-value" :validator string?
-	:meta {:doc "Description of your variable here.  Should be descriptive
-enough to allow an ops user to know what your variable does when they
-see it in adminsuite."})
+### Interface/Protocol Support
+#### clojure.lang.IDeref
+* deref : complete support.  Note that the read interface may lag successful writes.
 
-;; immediately after the def>-, your variable has the default value
-@yourvariable
-;; returns=> "default-value"
+#### clojure.lang.IMeta
+* meta : complete support, the metadata returned is the stat data structure from Zookeeper
 
-;; hosts is a comma separated list of zookeeper hosts including port 
-;; or 'localhost:2181' for local dev.  The calling application 
-;; will typically get it from the ZK_HOSTS environment variable
-(defn- zk-connect! []
-	(when-let [hosts (or (System/getProperty "ZK_HOSTS")
-                       (get (System/getenv) "ZK_HOSTS")
-                       (System/getProperty "PARAM2")
-                       (get {:development "localhost:2181"} (stage/stage)))]
-    (drcfg/connect! hosts)))
+#### clojure.lang.IRef
+* setValidator : complete support.  Validation is performed on inbound reads and outbound writes.
+* getValidator : complete support
+* getWatches : complete support
+* addWatch : complete support
+* removeWatch : partial support.  A watch may trigger one time after being removed.
 
-;; dereferencing your variable provides the latest value.  Note that 
-;; while def>- and connect! return immediately, it can take a second
-;; or so for the linked variables to have the zookeeper value
-@yourvariable
-;; returns=> "whatever-value-was-in-zookeeper" or "default-value" if
-;; this is a new node
+#### clojure.lang.IAtom
+* reset : full support
+* compareAndSet : full support.  Note that the implementation actually requries a version match as well as a value match.
+* swap : partial support.  A swap operation may fail if there is too much contention on the node at the cluster.
 
-;; if you need to update the value stored in zookeeper, use conventional
-;; clojure commands for updating an atom (swap!, reset!, compare-and-set!)
-;; after connecting.
+In addition to the above standard clojure interfaces, ZRefs support several additional protocols that leverage ZooKeeper's strengths and peculiarities:
 
-;; within a second or two after an update, all atoms referencing that
-;; value, across the distributed environment should be updated
-@yourvariable
-;; returns=> "new-value"
+#### roomkey.zref.UpdateableZNode
+* zPair - associate the ZRef with a provided client
+* zConnect - start online operations, including synchronization state with the corresponding Zookeeper node
+* zDisconnect - suspend online operations
+* zInitialize - Ensure that the corresponding ZooKeeper node exists and contains a value.
+* zProcessUpdate - process an inbound update from the cluster
 
-```
+#### roomkey.zref.Versionedupdate
+* compareVersionAndSet - similar to `compareAndSet` but requiring a version match in the store to effect an update.
+
+#### roomkey.zref.VersionedUpdate
+* compareVersionAndSet - Set to provided new-value only when current-version is latest
+
+####  roomkey.zref.VersionedDeref
+* vDeref - Return referenced value and version
+
+#### roomkey.zref.VersionedWatch
+* vAddWatch - Add a versioned watcher that will be called with new value and its version
+
 ### avoiding incessant logging from curator and zookeeper
 
 Zookeeper really, really wants your requests to zookeeper to get where
-they were going. Curator layers that with still more goodness. Any
-time zookeeper is down, they want you to know, so they log lots of
-exceptions and retry again and again to reestablish the connections.
-If you are a developer without a connection to zookeeper, this logging
+they were going.  If you are a developer without a connection to zookeeper, this logging
 will quickly overwhelm any useful info in the output.
 
 These log4j.properties settings can help:
@@ -168,12 +147,9 @@ These log4j.properties settings can help:
 # zookeeper is unavailable
 log4j.logger.org.apache.zookeeper.ClientCnxn=ERROR
 log4j.logger.org.apache.zookeeper.ZooKeeper=WARN
-log4j.logger.com.netflix.curator.ConnectionState=FATAL
-# additionally, avoid tons of DEBUG logging from zk and curator 
+# additionally, avoid tons of DEBUG logging from zk
 # when rootLogger is set to DEBUG
 log4j.logger.org.apache.zookeeper.ClientCnxnSocketNIO=INFO
-log4j.logger.com.netflix.curator.framework.imps.CuratorFrameworkImpl=INFO
-log4j.logger.com.netflix.curator.RetryLoop=INFO
 ```
 
 Alternatively, it can also be helpful to change the layout to use
@@ -184,7 +160,7 @@ to limit each logged stacktrace to n lines.
 
 If you want to run a local instance of ZooKeeper, you can set it up as follows:
 
-```bash
+``` bash
 wget http://mirror.symnds.com/software/Apache/zookeeper/zookeeper-3.4.5/zookeeper-3.4.5.tar.gz
 tar xvfz zookeeper-3.4.5.tar.gz
 cp zookeeper-3.4.5/conf/zoo_sample.cfg zookeeper-3.4.5/conf/zoo.cfg
