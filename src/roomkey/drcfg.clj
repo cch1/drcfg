@@ -19,27 +19,24 @@
   "Link a zref to a client-supplying channel"
   [z ch]
   ;; Need a lightweight finite-state machine abstraction here...
-  (async/go-loop [state {:paired? false :intialized? false}]
+  (async/go-loop [paired? false]
     (if-let [[ev client :as m] (async/<! ch)]
       (do
-        (log/debugf "Drcfg go-loop for zref %s received: %s" (.path z) m)
+        (log/tracef "Drcfg go-loop for zref %s received: %s" (.path z) m)
         (recur
          (case ev
            (:ConnectedReadOnly :SyncConnected)
-           (let [state (cond-> state
-                         (not (:paired? state)) (assoc :paired? (boolean (.zPair z client)))
-                         (not (:initialized? state)) (assoc :initialized? (boolean (.zInitialize z))))]
+           (let [state (or paired? (boolean (.zPair z client)))]
              (.zConnect z)
              state)
-           :Disconnected (do (.zDisconnect z) state)
-           :Expired (assoc state :paired? false)
-           (do (log/warnf "[%s] Received unexpected message: " state m) state))))
+           :Disconnected (do (.zDisconnect z) paired?)
+           :Expired false
+           (do (log/warnf "[%s] Received unexpected message: " paired? m) paired?))))
       (do ;; client input channel has closed, we're outta here
         (.zDisconnect z)
         (log/debugf "Client input channel has closed for %s, shutting down" (.path z))))))
 
 ;; TODO: Ensure root node exists
-;; TODO: Track cversion of root node for a sort of heartbeat
 (defn open
   ([hosts] (open (deref *registry*) hosts))
   ([registry hosts] (open registry hosts nil))

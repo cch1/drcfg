@@ -119,7 +119,6 @@ In addition to the above standard clojure interfaces, ZRefs support several addi
 * zPair - associate the ZRef with a provided client
 * zConnect - start online operations, including synchronization state with the corresponding Zookeeper node
 * zDisconnect - suspend online operations
-* zInitialize - Ensure that the corresponding ZooKeeper node exists and contains a value.
 * zProcessUpdate - process an inbound update from the cluster
 
 #### roomkey.zref.Versionedupdate
