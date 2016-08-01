@@ -2,6 +2,7 @@
   "Dynamic Distributed Run-Time configuration"
   (:require [roomkey.zref :as z]
             [roomkey.zclient :as zclient]
+            [zookeeper :as zoo]
             [clojure.core.async :as async]
             [clojure.string :as string]
             [clojure.tools.logging :as log]))
@@ -51,6 +52,15 @@
          (async/tap mux ch-sink)))
      ;; avoid a race condition by having mux wired up before feeding in client events
      (zclient/create (string/join "/" (filter identity [hosts zk-prefix scope])) ch-source))))
+
+(defn db-initialize!
+  "Synchronously initialize a fresh zookeeper database with a root node"
+  ([hosts] (db-initialize! hosts nil))
+  ([hosts scope]
+   (let [root (string/join "/" (filter identity ["" zk-prefix scope]))
+         zc (zoo/connect hosts)]
+     (log/infof "Creating root drcfg node %s for connect string %s" root hosts)
+     (zoo/create-all zc root :persistent? true))))
 
 (defn ^:deprecated connect-with-wait!
   "Open a connection to the zookeeper service and link previously defined local references"

@@ -56,15 +56,15 @@
                  (do (Thread/sleep 200)
                      (recur (- t 200))))))))
 
-(background [(around :facts (with-open [zc (zoo/connect connect-string)]
-                              (binding [*zc* zc]
-                                (let [root (abs-path "")]
-                                  (zoo/delete-all *zc* root)
-                                  (zoo/create-all *zc* root :persistent? true))
-                                (binding [roomkey.drcfg/*registry* (atom #{})] ?form))))])
-
 (fact "can create a config value"
   (>- (next-path) "my-default-value" :validator string?) => (refers-to "my-default-value"))
+
+(background [(around :contents (do (db-initialize! connect-string sandbox) ?form))
+             (around :facts (with-open [zc (zoo/connect connect-string)]
+                              (binding [*zc* zc]
+                                (let [root (abs-path "")]
+                                  (zoo/delete-children *zc* root))
+                                (binding [roomkey.drcfg/*registry* (atom #{})] ?form))))])
 
 (fact "Registration after connect still sets local atom"
   (connect! connect-string)
@@ -115,14 +115,6 @@
       (sync-path 5000 abs-path 0)
       (set-path! abs-path 1)
       la => (eventually-refers-to 10000 1))))
-
-(future-fact "def>- Metadata is stored, var is added, etc."
-  (let [n (next-path)
-        abs-path (abs-path n)
-        [_ lam] (>- n 0 :validator integer? :meta {:doc "my doc string"})]
-    (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
-      (sync-path 1000 (str abs-path "/.metadata") {:doc "my doc string"}) => truthy
-      lam => (eventually-refers-to 10000 {:doc "my doc string"}))))
 
 (fact "Validator prevents updates to local atom"
   (let [n (next-path)
