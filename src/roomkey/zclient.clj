@@ -20,24 +20,24 @@
   (close [this] "Close the connection")
   (renew [this] "Renew the connection"))
 
-(deftype ZClient [connect-string zc c]
+(deftype ZClient [connect-string zclient ch]
   Connectable
   (open [this] ; TODO: allow parameterization of ZooKeeper instantiation
     (let [new (ZooKeeper. connect-string (int 1000) this (boolean true))]
-      (swap! zc (fn [old]
+      (swap! zclient (fn [old]
                   (assert (nil? old) "Can't open already opened ZClient")
                   new)))
     this)
   (close [this]
-    (let [old (swap*! zc (fn [old]
+    (let [old (swap*! zclient (fn [old]
                            (assert old "Can't close unopened ZClient")
                            nil))]
-      (async/close! c)
+      (async/close! ch)
       (.close old))
     this)
   (renew [this]
     (let [new (ZooKeeper. connect-string (int 1000) this (boolean true))
-          old (swap*! zc (constantly new))]
+          old (swap*! zclient (constantly new))]
       (.close old))
     this)
   org.apache.zookeeper.Watcher
@@ -46,16 +46,16 @@
     (let [ev (keyword (.name (.getState event)))]
       (log/debugf "ZK %s %s (%s)" ev (keyword (.name (.getType event))) (.getPath event))
       (case ev
-        :AuthFailed (log/warnf "[ZK %s] SASL Authentication Failed @ %s" @zc connect-string)
-        :SaslAuthenticated (log/infof "[ZK %s] SASL Authenticated" @zc)
-        :ConnectedReadOnly (async/go (async/>! c [ev @zc]))
-        :SyncConnected (async/go (async/>! c [ev @zc]))
-        :Disconnected (async/go (async/>! c [ev @zc]))
-        :Expired (do (log/warnf "Session Expired!") (async/go (async/>! c [ev @zc])) (.renew this))
+        :AuthFailed (log/warnf "[ZK %s] SASL Authentication Failed @ %s" @zclient connect-string)
+        :SaslAuthenticated (log/infof "[ZK %s] SASL Authenticated" @zclient)
+        :ConnectedReadOnly (async/go (async/>! ch [ev @zclient]))
+        :SyncConnected (async/go (async/>! ch [ev @zclient]))
+        :Disconnected (async/go (async/>! ch [ev @zclient]))
+        :Expired (do (log/warnf "Session Expired!") (async/go (async/>! ch [ev @zclient])) (.renew this))
         (:Unknown :NoSyncConnected) (throw (Exception. (format "Deprecated event: %s") ev))
         (throw (Exception. (format "Unexpected event: %s") ev))))))
 
 ;; TODO: shutdown on channel close and event arriving and dispense with close
-(defn create [cstr c]
+(defn create [cstr ch]
   {:pre [(string? cstr)]}
-  (.open (->ZClient cstr (atom nil) c)))
+  (.open (->ZClient cstr (atom nil) ch)))
