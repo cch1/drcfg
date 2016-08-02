@@ -63,5 +63,4 @@
         (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:Disconnected (partial instance? ZooKeeper)])])
         (log/info ">>>>>>>>>> About to start a new server -should trigger expiration of existing sessions <<<<<<")
         (.start $t1)
-        (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:Expired (partial instance? ZooKeeper)])])
         (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:SyncConnected (partial instance? ZooKeeper)])])))))

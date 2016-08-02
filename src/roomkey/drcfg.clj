@@ -26,7 +26,6 @@
         (case ev
           (:ConnectedReadOnly :SyncConnected) (.zConnect z client)
           :Disconnected (.zDisconnect z)
-          :Expired (assert (nil? (.client z))) ; should already be disconnected
           (log/warnf "[%s] Received unexpected message: " m))
         (recur))
       (do ;; client input channel has closed, we're outta here

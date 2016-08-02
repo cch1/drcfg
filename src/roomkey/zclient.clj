@@ -51,7 +51,7 @@
         :ConnectedReadOnly (async/go (async/>! ch [ev @zclient]))
         :SyncConnected (async/go (async/>! ch [ev @zclient]))
         :Disconnected (async/go (async/>! ch [ev @zclient]))
-        :Expired (do (log/warnf "Session Expired!") (async/go (async/>! ch [ev @zclient])) (.renew this))
+        :Expired (do (log/warnf "Session Expired!") (.renew this))
         (:Unknown :NoSyncConnected) (throw (Exception. (format "Deprecated event: %s") ev))
         (throw (Exception. (format "Unexpected event: %s") ev))))))
 
