@@ -17,7 +17,8 @@ Copyright (C) 2016 [RoomKey](http://www.roomkey.com)
 1. Provide a run-time distributed data element -the ZRef.
 2. Provide high resiliency -including reasonable operation when no zookeeper node is available at all (such as airplane mode).
 3. To the extent possible, implement the interfaces of Clojure's own atom on a ZRef:
-4. Expose the Zookeeper [stat](https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_zkStatStructure) data through metadata on the ZRef (and the "versioned" protocols)
+4. Expose the Zookeeper [stat](https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_zkStatStructure) data through metadata on the ZRef.
+5. Support updates using both Clojure's own native ref-updating functions (`swap!`, `reset!`, etc) as well as functions that leverage ZooKeeper's innate versioned updates.
 5. Support arbitrary metadata through an auxilliary ZRef (stored in a child path `.metadata`)
 6. Avoid the weight of additional support libraries such as [Apache Curator](https://curator.apache.org/) while still providing client resiliency and rollover.
 
@@ -25,7 +26,7 @@ Copyright (C) 2016 [RoomKey](http://www.roomkey.com)
 
 When using the `def>-` macro, drcfg stores values in zookeeper at the path `/drcfg/<*ns*>/<varname>` where `*ns*` is the namespace of the module that defines the var.
 
-When using the `def>-` macro, drcfg will also creates a `.metadata` zookeeper node under the defined node containing any metadata (hopefully including a doc string as described below).  If no metadata is provided, the node is not created.
+When using the `def>-` macro, drcfg will also creates a `.metadata` zookeeper node under the defined node containing any metadata (hopefully including a doc string as described below).  If no metadata is provided, the node is not created.  Note that normal metadata on the reference object is represented by the ZooKeeper stat data structure.
 
 ### drcfg usage
 
@@ -109,11 +110,11 @@ echo wchp | nc 127.0.0.1 2181 | grep drcfg | sort
 * removeWatch : partial support.  A watch may trigger one time after being removed.
 
 #### clojure.lang.IAtom
-* reset : full support
-* compareAndSet : full support.  Note that the implementation actually requries a version match as well as a value match.
-* swap : partial support.  A swap operation may fail if there is too much contention on the node at the cluster.
+* reset : complete support
+* compareAndSet : complete support.  Note that the implementation actually requries a version match as well as a value match.
+* swap : complete support.  Note that a swap operation may fail if there is too much contention on the node at the cluster.
 
-In addition to the above standard clojure interfaces, ZRefs support several additional protocols that leverage ZooKeeper's strengths and peculiarities:
+In addition to the above standard clojure interfaces, ZRefs support several additional protocols that leverage ZooKeeper's strengths and accommodate its peculiarities:
 
 #### roomkey.zref.UpdateableZNode
 * zPair - associate the ZRef with a provided client
@@ -121,11 +122,8 @@ In addition to the above standard clojure interfaces, ZRefs support several addi
 * zDisconnect - suspend online operations
 * zProcessUpdate - process an inbound update from the cluster
 
-#### roomkey.zref.Versionedupdate
-* compareVersionAndSet - similar to `compareAndSet` but requiring a version match in the store to effect an update.
-
 #### roomkey.zref.VersionedUpdate
-* compareVersionAndSet - Set to provided new-value only when current-version is latest
+* compareVersionAndSet - similar to `compareAndSet` but requiring a version match in the store to effect an update.
 
 ####  roomkey.zref.VersionedDeref
 * vDeref - Return referenced value and version
@@ -133,7 +131,7 @@ In addition to the above standard clojure interfaces, ZRefs support several addi
 #### roomkey.zref.VersionedWatch
 * vAddWatch - Add a versioned watcher that will be called with new value and its version
 
-### avoiding incessant logging from curator and zookeeper
+### Avoiding incessant logging from curator and zookeeper
 
 Zookeeper really, really wants your requests to zookeeper to get where
 they were going.  If you are a developer without a connection to zookeeper, this logging
