@@ -117,8 +117,7 @@ echo wchp | nc 127.0.0.1 2181 | grep drcfg | sort
 In addition to the above standard clojure interfaces, ZRefs support several additional protocols that leverage ZooKeeper's strengths and accommodate its peculiarities:
 
 #### roomkey.zref.UpdateableZNode
-* zPair - associate the ZRef with a provided client
-* zConnect - start online operations, including synchronization state with the corresponding Zookeeper node
+* zConnect - start online operations with the given client
 * zDisconnect - suspend online operations
 * zProcessUpdate - process an inbound update from the cluster
 

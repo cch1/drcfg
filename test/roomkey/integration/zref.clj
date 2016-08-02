@@ -36,32 +36,32 @@
 
 (fact "Pairing a ZRef and ZClient returns the ZRef"
   (with-open [$c (zoo/connect (str connect-string sandbox))]
-    (.zPair (zref "/myzref" "A") $c)) => (partial instance? roomkey.zref.ZRef))
+    (.zConnect (zref "/myzref" "A") $c)) => (partial instance? roomkey.zref.ZRef))
 
 (fact "Connecting a ZRef in a virgin zookeeper creates the node with default data"
   (with-open [$c (zoo/connect (str connect-string sandbox))]
-    (.zConnect (.zPair (zref "/myzref" "A") $c)) => truthy)
+    (.zConnect (zref "/myzref" "A") $c) => truthy)
   (with-open [c (zoo/connect (str connect-string sandbox))]
     (zoo/data c "/myzref")) => (contains {:data (fn [x] (= "A" (z/*deserialize* x)))
                                          :stat (contains {:version 1})}))
 
 (fact "Can update a connected ZRef"
   (with-open [$c (zoo/connect (str connect-string sandbox))]
-    (let [$z (.zConnect (.zPair (zref "/zref0" "A") $c))]
+    (let [$z (.zConnect (zref "/zref0" "A") $c)]
       (.compareVersionAndSet $z 1 "B") => true
       (.compareVersionAndSet $z 12 "C") => false)
-    (let [$z (.zConnect (.zPair (zref "/zref1" "A") $c))]
+    (let [$z (.zConnect (zref "/zref1" "A") $c)]
       (compare-and-set! $z "Z" "B") => false
       (compare-and-set! $z "A" "B") => true
       (reset! $z "C") => "C")
-    (let [$z (.zConnect (.zPair (zref "/zref2" 1) $c))]
+    (let [$z (.zConnect (zref "/zref2" 1) $c)]
       (swap! $z inc) => 2
       (swap! $z inc) => 3
       (Thread/sleep 1000))))
 
 (fact "A connected ZRef is updated by changes at the cluster"
   (with-open [$c (zoo/connect (str connect-string sandbox))]
-    (let [$z (.zConnect (.zPair (zref "/myzref" "A") $c))
+    (let [$z (.zConnect (zref "/myzref" "A") $c)
           sync (promise)]
       (add-watch $z :sync (fn [& args] (deliver sync args)))
       (with-open [c (zoo/connect (str connect-string sandbox))]
@@ -71,7 +71,7 @@
 
 (fact "A connected ZRef is not updated by invalid values at the cluster"
   (with-open [$c (zoo/connect (str connect-string sandbox))]
-    (let [$z (.zConnect (.zPair (zref "/myzref" "A" :validator string?) $c))
+    (let [$z (.zConnect (zref "/myzref" "A" :validator string?) $c)
           sync (promise)]
       (add-watch $z :sync (fn [& args] (deliver sync args)))
       (with-open [c (zoo/connect (str connect-string sandbox))]
@@ -83,8 +83,8 @@
 
 (fact "Children do not intefere with their parents"
   (with-open [$c (zoo/connect (str connect-string sandbox))]
-    (let [$zB (.zConnect (.zPair (zref "/myzref/child" "B" :validator string?) $c))
-          $zA (.zConnect (.zPair (zref "/myzref" "A" :validator string?) $c))
+    (let [$zB (.zConnect (zref "/myzref/child" "B" :validator string?) $c)
+          $zA (.zConnect (zref "/myzref" "A" :validator string?) $c)
           sync-a (promise)
           sync-b (promise)]
       (add-watch $zA :sync (fn [& args] (deliver sync-a args)))
@@ -99,7 +99,7 @@
 
 (fact "A connected ZRef is updated by deletion at the cluster"
   (with-open [$c (zoo/connect (str connect-string sandbox))]
-    (let [$z (.zConnect (.zPair (zref "/myzref" "A") $c))
+    (let [$z (.zConnect (zref "/myzref" "A") $c)
           sync (promise)]
       (add-watch $z :sync (fn [& args] (deliver sync args)))
       (with-open [c (zoo/connect (str connect-string sandbox))]
@@ -111,7 +111,7 @@
         sync (promise)]
     (add-watch $z :sync (fn [& args] (deliver sync args)))
     (with-open [$c (zoo/connect (str connect-string sandbox))]
-      (.zConnect (.zPair $z $c))
+      (.zConnect $z $c)
       @sync
       (.zDisconnect $z)
       @$z)) => "A")
@@ -120,7 +120,7 @@
   (with-open [s (TestingServer. true)]
     (let [z (zref "/myzref" "A")]
       (with-open [c (zoo/connect (.getConnectString s))]
-        (.zConnect (.zPair z c))
+        (.zConnect z c)
         (.restart s)
         (Thread/sleep 1000) ; a watch on the client would remove this silliness
         (let [p (promise)]
@@ -134,12 +134,12 @@
     (let [z0 (zref "/myzref" "A")
           z1 (zref "/myzref" "A")]
       (with-open [c0 (zoo/connect (.getConnectString s))]
-        (.zConnect (.zPair z0 c0))
+        (.zConnect z0 c0)
         (reset! z0 "B")
         (.zDisconnect z0))
       (with-open [c1 (zoo/connect (.getConnectString s))]
-        (.zConnect (.zPair z1 c1))
+        (.zConnect z1 c1)
         (reset! z1 "C")
         (reset! z1 "D")
-        (.zConnect (.zPair z0 c1))
+        (.zConnect z0 c1)
         z0)) => (refers-to "D")))

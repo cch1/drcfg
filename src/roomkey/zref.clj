@@ -42,8 +42,7 @@
 ;;;  * The swap operation can fail if there is too much contention for a znode.
 ;;;  * Simple watcher functions are wrapped to ignore the version parameter applied to full-fledged watchers.
 (defprotocol UpdateableZNode
-  (zPair [this client] "Associate with the given client")
-  (zConnect [this] "Start online operations")
+  (zConnect [this client] "Start online operations with the given client")
   (zDisconnect [this] "Suspend online operations")
   (zProcessUpdate [this new-zdata] "Process the zookeeper update and return this (the znode)"))
 
@@ -61,7 +60,7 @@
   "An unhygenic macro that captures `this` and binds `client` to manage connection issues"
   [& body]
   (let [emessage "Not connected while processing ZooKeeper requests"]
-    `(try (if-let [~'client (when (.connected? ~'this) (deref (.client ~'this)))]
+    `(try (if-let [~'client (deref (.client ~'this))]
             ~@body
             (throw (ex-info ~emessage {:path (.path ~'this)})))
           (catch KeeperException$SessionExpiredException e#
@@ -71,12 +70,11 @@
             (.zDisconnect ~'this)
             (throw (ex-info ~emessage {:path (.path ~'this)} e#))))))
 
-(deftype ZRef [client connected? initialized? path cache validator watches]
+(deftype ZRef [path client initialized? cache validator watches]
   UpdateableZNode
-  (zPair [this c] (reset! client c) this)
-  (zConnect [this]
-    (try (reset! connected? true)
-         (when (not @initialized?)
+  (zConnect [this c]
+    (reset! client c)
+    (try (when (not @initialized?)
            (when (with-monitored-client (create-all client path)) ; idempotent side effects
              (log/debugf "Created node %s" path))
            (when (.compareVersionAndSet this 0 (.deref this)) ; idempotent side effects
@@ -86,7 +84,7 @@
          this
          (catch Exception e nil)))
   (zDisconnect [this]
-    (reset! connected? false)
+    (reset! client nil)
     this)
   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
   ;; https://www.safaribooksonline.com/library/view/zookeeper/9781449361297/ch04.html
@@ -187,7 +185,7 @@
 (defn zref
   [path default & options]
   (let [{validator :validator} (apply hash-map options)
-        z (->ZRef (atom nil) (atom false) (atom false) path (atom {:data default :stat {:version -1}})
+        z (->ZRef path (atom nil) (atom false) (atom {:data default :stat {:version -1}})
                  (atom nil) (atom {}))]
     (when validator (.setValidator z validator))
     z))
