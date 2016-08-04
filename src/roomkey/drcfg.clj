@@ -32,7 +32,6 @@
         (log/debugf "Client input channel has closed for %s, shutting down" (.path z))
         (.zDisconnect z)))))
 
-;; TODO: Ensure root node exists
 (defn open
   ([hosts] (open (deref *registry*) hosts))
   ([registry hosts] (open registry hosts nil))
