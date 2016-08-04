@@ -48,9 +48,9 @@
       (case ev
         :AuthFailed (log/warnf "[ZK %s] SASL Authentication Failed @ %s" @zclient connect-string)
         :SaslAuthenticated (log/infof "[ZK %s] SASL Authenticated" @zclient)
-        :ConnectedReadOnly (async/go (async/>! ch [ev @zclient]))
-        :SyncConnected (async/go (async/>! ch [ev @zclient]))
-        :Disconnected (async/go (async/>! ch [ev @zclient]))
+        :ConnectedReadOnly (async/put! ch [ev @zclient])
+        :SyncConnected (async/put! ch [ev @zclient])
+        :Disconnected (async/put! ch [ev @zclient])
         :Expired (do (log/warnf "Session Expired!") (.renew this))
         (:Unknown :NoSyncConnected) (throw (Exception. (format "Deprecated event: %s") ev))
         (throw (Exception. (format "Unexpected event: %s") ev))))))
