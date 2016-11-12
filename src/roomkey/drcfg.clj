@@ -49,10 +49,10 @@
   "Synchronously initialize a fresh zookeeper database with a root node"
   ([hosts] (db-initialize! hosts nil))
   ([hosts scope]
-   (let [root (string/join "/" (filter identity ["" zk-prefix scope]))
-         zc (zoo/connect hosts)]
+   (let [root (string/join "/" (filter identity ["" zk-prefix scope]))]
      (log/infof "Creating root drcfg node %s for connect string %s" root hosts)
-     (zoo/create-all zc root :persistent? true))))
+     (with-open [zc (zoo/connect hosts)]
+       (zoo/create-all zc root :persistent? true)))))
 
 (defn ^:deprecated connect-with-wait!
   "Open a connection to the zookeeper service and link previously defined local references"
