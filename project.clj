@@ -12,7 +12,7 @@
   :min-lein-version "2.5.0"
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [org.clojure/tools.logging "0.3.1"]
-                 [org.clojure/core.async "0.2.385"]
+                 [org.clojure/core.async "0.2.395"]
                  [zookeeper-clj "0.9.4" :exclusions [org.apache.zookeeper/zookeeper]]
                  [org.apache.zookeeper/zookeeper "3.5.1-alpha"]]
   :repositories [["rk-public" {:url "http://rk-maven-public.s3-website-us-east-1.amazonaws.com/releases/"}]
