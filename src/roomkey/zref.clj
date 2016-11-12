@@ -59,7 +59,7 @@
 (defmacro with-monitored-client
   "An unhygenic macro that captures `this` and binds `client` to manage connection issues"
   [& body]
-  (let [emessage "Not connected while processing ZooKeeper requests"]
+  (let [emessage "Lost connection while processing ZooKeeper requests"]
     `(try (if-let [~'client (deref (.client ~'this))]
             ~@body
             (throw (ex-info ~emessage {:path (.path ~'this)})))
@@ -70,19 +70,19 @@
             (.zDisconnect ~'this)
             (throw (ex-info ~emessage {:path (.path ~'this)} e#))))))
 
-(deftype ZRef [path client initialized? cache validator watches]
+(deftype ZRef [path client cache validator watches]
   UpdateableZNode
   (zConnect [this c]
     (reset! client c)
-    (try (when (not @initialized?)
-           (when (with-monitored-client (create-all client path)) ; idempotent side effects
-             (log/debugf "Created node %s" path))
-           (when (.compareVersionAndSet this 0 (.deref this)) ; idempotent side effects
-             (log/infof "Updated node %s with default value" path))
-           (reset! initialized? true))
-         (.zProcessUpdate this {:path path :event-type ::Boot :keeper-state nil})
-         this
-         (catch Exception e nil)))
+    (try (when (with-monitored-client (create-all client path)) ; idempotent side effects
+           (log/debugf "Created node %s" path))
+         (when (.compareVersionAndSet this 0 (.deref this)) ; idempotent side effects
+           (log/debugf "Updated node %s with default value" path))
+         (catch clojure.lang.ExceptionInfo e
+           (log/infof e "Lost connection while initializing %s" path)
+           nil))
+    (.zProcessUpdate this {:path path :event-type ::Boot :keeper-state nil})
+    this)
   (zDisconnect [this]
     (reset! client nil)
     this)
@@ -185,7 +185,7 @@
 (defn zref
   [path default & options]
   (let [{validator :validator} (apply hash-map options)
-        z (->ZRef path (atom nil) (atom false) (atom {:data default :stat {:version -1}})
+        z (->ZRef path (atom nil) (atom {:data default :stat {:version -1}})
                  (atom nil) (atom {}))]
     (when validator (.setValidator z validator))
     z))
