@@ -11,17 +11,17 @@
                   ["deploy"]]
   :min-lein-version "2.5.0"
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [org.clojure/tools.logging "0.3.1"]
-                 [org.clojure/core.async "0.2.395"]
+                 [org.clojure/tools.logging "0.4.0"]
+                 [org.clojure/core.async "0.3.443"]
                  [zookeeper-clj "0.9.4" :exclusions [org.apache.zookeeper/zookeeper]]
                  [org.apache.zookeeper/zookeeper "3.5.1-alpha"]]
   :repositories [["rk-public" {:url "http://rk-maven-public.s3-website-us-east-1.amazonaws.com/releases/"}]
                  ["releases" {:url "s3://rk-maven/releases/"}]]
   :jvm-opts ["-Djava.io.tmpdir=./tmp"]
   :profiles {:dev {:dependencies [[midje "1.8.3" :exclusions [commons-codec]]
-                                  [org.apache.curator/curator-test "3.2.0"]
-                                  [org.slf4j/slf4j-api "1.7.21"]
-                                  [org.slf4j/jcl-over-slf4j "1.7.21"]
-                                  [org.slf4j/slf4j-log4j12 "1.7.21"]
+                                  [org.apache.curator/curator-test "3.3.0"]
+                                  [org.slf4j/slf4j-api "1.7.25"]
+                                  [org.slf4j/jcl-over-slf4j "1.7.25"]
+                                  [org.slf4j/slf4j-log4j12 "1.7.25"]
                                   [log4j/log4j "1.2.17"]]}
              :test {:resource-paths ["test-resources"]}})
