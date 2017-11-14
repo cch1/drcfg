@@ -15,8 +15,6 @@
                  [org.clojure/core.async "0.3.443"]
                  [zookeeper-clj "0.9.4" :exclusions [org.apache.zookeeper/zookeeper]]
                  [org.apache.zookeeper/zookeeper "3.5.3-beta"]]
-  :repositories [["rk-public" {:url "http://rk-maven-public.s3-website-us-east-1.amazonaws.com/releases/"}]
-                 ["releases" {:url "s3://rk-maven/releases/"}]]
   :jvm-opts ["-Djava.io.tmpdir=./tmp"]
   :profiles {:dev {:dependencies [[midje "1.8.3" :exclusions [commons-codec]]
                                   [org.apache.curator/curator-test "4.0.0"]
