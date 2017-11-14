@@ -20,23 +20,23 @@
   (close [this] "Close the connection")
   (renew [this] "Renew the connection"))
 
-(deftype ZClient [connect-string zclient ch]
+(deftype ZClient [connect-string timeout zclient ch]
   Connectable
   (open [this] ; TODO: allow parameterization of ZooKeeper instantiation
-    (let [new (ZooKeeper. connect-string (int 1000) this (boolean true))]
+    (let [new (ZooKeeper. connect-string timeout this (boolean true))]
       (swap! zclient (fn [old]
-                  (assert (nil? old) "Can't open already opened ZClient")
-                  new)))
+                       (assert (nil? old) "Can't open already opened ZClient")
+                       new)))
     this)
   (close [this]
     (let [old (swap*! zclient (fn [old]
-                           (assert old "Can't close unopened ZClient")
-                           nil))]
+                                (assert old "Can't close unopened ZClient")
+                                nil))]
       (async/close! ch)
       (.close old))
     this)
   (renew [this]
-    (let [new (ZooKeeper. connect-string (int 1000) this (boolean true))
+    (let [new (ZooKeeper. connect-string timeout this (boolean true))
           old (swap*! zclient (constantly new))]
       (.close old))
     this)
@@ -56,6 +56,6 @@
         (throw (Exception. (format "Unexpected event: %s") ev))))))
 
 ;; TODO: shutdown on channel close and event arriving and dispense with close
-(defn create [cstr ch]
+(defn create [cstr ch & {:keys [timeout] :or {timeout 16000} :as options}]
   {:pre [(string? cstr)]}
-  (.open (->ZClient cstr (atom nil) ch)))
+  (.open (->ZClient cstr timeout (atom nil) ch)))
