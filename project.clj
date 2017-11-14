@@ -1,7 +1,7 @@
 (defproject com.roomkey/drcfg :lein-v
   :description "Dynamic Runtime Configuration Utility based on Zookeeper"
   :url "https://github.com/roomkey/drcfg"
-  :plugins [[com.roomkey/lein-v "5.0.1"]]
+  :plugins [[com.roomkey/lein-v "6.2.0"]]
   :license {:name "Copyright Hotel JV Services LLC"
             :distribution :manual
             :comments "All rights reserved"}
