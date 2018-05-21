@@ -17,7 +17,7 @@ Copyright (C) 2016 [RoomKey](http://www.roomkey.com)
 1. Provide a run-time distributed data element -the ZRef.
 2. Provide high resiliency -including reasonable operation when no zookeeper node is available at all (such as airplane mode).
 3. To the extent possible, implement the interfaces of Clojure's own atom on a ZRef:
-4. Expose the Zookeeper [stat](https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_zkStatStructure) data through metadata on the ZRef.
+4. Expose the Zookeeper [stat](https://zookeeper.apache.org/doc/current/zookeeperProgrammers.html#sc_zkStatStructure) data through metadata on the ZRef.
 5. Support updates using both Clojure's own native ref-updating functions (`swap!`, `reset!`, etc) as well as functions that leverage ZooKeeper's innate versioned updates.
 5. Support arbitrary metadata through an auxilliary ZRef (stored in a child path `.metadata`)
 6. Avoid the weight of additional support libraries such as [Apache Curator](https://curator.apache.org/) while still providing client resiliency and rollover.
