@@ -1,13 +1,15 @@
 (defproject com.roomkey/drcfg :lein-v
   :description "Dynamic Runtime Configuration Utility based on Zookeeper"
   :url "https://github.com/roomkey/drcfg"
-  :plugins [[com.roomkey/lein-v "6.2.0"]]
+  :plugins [[com.roomkey/lein-v "7.0.0"]]
+  :middleware [lein-v.plugin/middleware]
   :license {:name "Copyright Hotel JV Services LLC"
             :distribution :manual
             :comments "All rights reserved"}
   :release-tasks [["vcs" "assert-committed"]
                   ["v" "update"] ;; compute new version & tag it
                   ["vcs" "push"]
+                  ["v" "abort-when-not-anchored"]
                   ["deploy" "rk-maven"]]
   :min-lein-version "2.8.1"
   :dependencies [[org.clojure/clojure "1.10.0"]
