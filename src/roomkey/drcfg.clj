@@ -54,16 +54,6 @@
      (with-open [zc (zoo/connect hosts)]
        (zoo/create-all zc root :persistent? true)))))
 
-(defn ^:deprecated connect-with-wait!
-  "Open a connection to the zookeeper service and link previously defined local references"
-  [hosts & [scope]]
-  (swap! *registry* (fn [r]
-                      (when-let [c (::client (meta r))]
-                        (.close c)) ; close any existing client
-                      (with-meta r {::client (open r hosts scope)}))))
-
-(def ^:deprecated connect! connect-with-wait!)
-
 (defn >-
   "Create a config reference with the given name (must be fully specified,
   including leading slash) and default value and record it for future connecting"

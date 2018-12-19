@@ -85,7 +85,7 @@
     (.zProcessUpdate this {:path path :event-type ::Boot :keeper-state nil})
     this)
   (zDisconnect [this]
-    (when-let [c @client] (.removeAllWatches c path Watcher$WatcherType/Data true))
+    (.removeAllWatches @client path Watcher$WatcherType/Data true)
     (reset! client nil)
     this)
   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches

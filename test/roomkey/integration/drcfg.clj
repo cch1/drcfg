@@ -57,7 +57,7 @@
                      (recur (- t 200))))))))
 
 (fact "can create a config value"
-  (>- (next-path) "my-default-value" :validator string?) => (refers-to "my-default-value"))
+      (>- (next-path) "my-default-value" :validator string?) => (refers-to "my-default-value"))
 
 (background [(around :contents (do (db-initialize! connect-string sandbox) ?form))
              (around :facts (with-open [zc (zoo/connect connect-string)]
@@ -66,95 +66,84 @@
                                   (zoo/delete-children *zc* root))
                                 (binding [roomkey.drcfg/*registry* (atom #{})] ?form))))])
 
-(fact "Registration after connect still sets local atom"
-  (connect! connect-string)
-  (>- (next-path) "my-default-value" :validator string?) => (refers-to "my-default-value"))
-
 (fact "Can open and close connections regardless of viability"
-  (with-open [c (open #{} bogus-host)]
-    c => (partial instance? roomkey.zclient.ZClient)) => anything
-  (with-open [c (open #{} connect-string)]
-    c => (partial instance? roomkey.zclient.ZClient)) => anything)
+      (with-open [c (open #{} bogus-host)]
+        c => (partial instance? roomkey.zclient.ZClient)) => anything
+      (with-open [c (open #{} connect-string)]
+        c => (partial instance? roomkey.zclient.ZClient)) => anything)
 
 (fact "Slaved config value gets updated post-connect"
-  (let [p (next-path)
-        abs-path (abs-path p)
-        la (>- p "V0" :validator string?)]
-    (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
-      (sync-path 5000 abs-path "V0")
-      (set-path! abs-path "V1")
-      la => (eventually-refers-to 10000 "V1"))))
+      (let [p (next-path)
+            abs-path (abs-path p)
+            la (>- p "V0" :validator string?)]
+        (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
+          (sync-path 5000 abs-path "V0")
+          (set-path! abs-path "V1")
+          la => (eventually-refers-to 10000 "V1"))))
 
 (fact "Slaved config value at deep path gets updated post-connect"
-  (let [p "/N/0" ; (next-path)
-        abs-path (abs-path p)
-        la (>- p "V0" :validator string?)]
-    (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
-      (sync-path 5000 abs-path "V0")
-      (set-path! abs-path "V1")
-      la => (eventually-refers-to 10000 "V1"))))
+      (let [p "/N/0" ; (next-path)
+            abs-path (abs-path p)
+            la (>- p "V0" :validator string?)]
+        (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
+          (sync-path 5000 abs-path "V0")
+          (set-path! abs-path "V1")
+          la => (eventually-refers-to 10000 "V1"))))
 
 (fact "Children don't intefere with their parents"
-  (let [n0 (next-path)
-        n1 (str n0 "/child")
-        abs-path0 (abs-path n0)
-        abs-path1 (abs-path n1)
-        la0 (>- n0 0 :validator integer?)
-        la1 (>- n1 1 :validator integer?)]
-    (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
-      (sync-path 5000 abs-path0 0)
-      (sync-path 5000 abs-path1 1)
-      (set-path! abs-path0 1)
-      la0 => (eventually-refers-to 10000 1))))
+      (let [n0 (next-path)
+            n1 (str n0 "/child")
+            abs-path0 (abs-path n0)
+            abs-path1 (abs-path n1)
+            la0 (>- n0 0 :validator integer?)
+            la1 (>- n1 1 :validator integer?)]
+        (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
+          (sync-path 5000 abs-path0 0)
+          (sync-path 5000 abs-path1 1)
+          (set-path! abs-path0 1)
+          la0 => (eventually-refers-to 10000 1))))
 
 (fact "Serialization works"
-  (let [n (next-path)
-        abs-path (abs-path n)
-        la (>- n 0 :validator integer?)]
-    (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
-      (sync-path 5000 abs-path 0)
-      (set-path! abs-path 1)
-      la => (eventually-refers-to 10000 1))))
+      (let [n (next-path)
+            abs-path (abs-path n)
+            la (>- n 0 :validator integer?)]
+        (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
+          (sync-path 5000 abs-path 0)
+          (set-path! abs-path 1)
+          la => (eventually-refers-to 10000 1))))
 
 (fact "Validator prevents updates to local atom"
-  (let [n (next-path)
-        abs-path (abs-path n)
-        la (>- n 0 :validator integer?)]
-    (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
-      (sync-path 5000 abs-path 0)
-      (set-path! abs-path "x")
-      (sync-path 5000 abs-path "x")
-      la => (refers-to 0))))
+      (let [n (next-path)
+            abs-path (abs-path n)
+            la (>- n 0 :validator integer?)]
+        (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
+          (sync-path 5000 abs-path 0)
+          (set-path! abs-path "x")
+          (sync-path 5000 abs-path "x")
+          la => (refers-to 0))))
 
 (fact "Without a validator, heterogenous values are allowed"
-  (let [n (next-path)
-        abs-path (abs-path n)
-        la (>- n 0)]
-    (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
-      (sync-path 5000 abs-path 0)
-      (set-path! abs-path "x")
-      la => (eventually-refers-to 10000 "x")
-      (set-path! abs-path false)
-      la => (eventually-refers-to 10000 false)
-      (set-path! abs-path true)
-      la => (eventually-refers-to 10000 true)
-      (set-path! abs-path nil)
-      la => (eventually-refers-to 10000 nil)
-      (set-path! abs-path #inst "2015-05-08T19:35:09.371-00:00")
-      la => (eventually-refers-to 10000 #inst "2015-05-08T19:35:09.371-00:00"))))
+      (let [n (next-path)
+            abs-path (abs-path n)
+            la (>- n 0)]
+        (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
+          (sync-path 5000 abs-path 0)
+          (set-path! abs-path "x")
+          la => (eventually-refers-to 10000 "x")
+          (set-path! abs-path false)
+          la => (eventually-refers-to 10000 false)
+          (set-path! abs-path true)
+          la => (eventually-refers-to 10000 true)
+          (set-path! abs-path nil)
+          la => (eventually-refers-to 10000 nil)
+          (set-path! abs-path #inst "2015-05-08T19:35:09.371-00:00")
+          la => (eventually-refers-to 10000 #inst "2015-05-08T19:35:09.371-00:00"))))
 
 (facts "pre-configured value gets applied"
-  (let [n (next-path)
-        abs-path (abs-path n)]
-    (create-path! abs-path "value")
-    (create-path! (str abs-path "/.metadata") {:doc "My Doc"})
-    (let [la (>- n "default-value" :meta {:doc "My Default Doc"})]
-      (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
-        la => (eventually-refers-to 10000 "value")))))
-
-(fact "connect! can continue if server not available"
-  (let [la (>- (next-path) "my-default-value" :validator string?)]
-    (connect! bogus-host) => set?
-    (meta @roomkey.drcfg/*registry*)
-    => (contains {:roomkey.drcfg/client (partial instance? roomkey.zclient.ZClient)})
-    (.close (:roomkey.drcfg/client (meta (deref roomkey.drcfg/*registry*))))))
+       (let [n (next-path)
+             abs-path (abs-path n)]
+         (create-path! abs-path "value")
+         (create-path! (str abs-path "/.metadata") {:doc "My Doc"})
+         (let [la (>- n "default-value" :meta {:doc "My Default Doc"})]
+           (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
+             la => (eventually-refers-to 10000 "value")))))
