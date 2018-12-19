@@ -63,12 +63,12 @@
   (let [emessage "Lost connection while processing ZooKeeper requests"]
     `(try (if-let [~'client (deref (.client ~'this))]
             ~@body
-            (throw (ex-info ~emessage {:path (.path ~'this)})))
+            (throw (ex-info "Client unavailable while processing ZooKeeper requests" {:path (.path ~'this)})))
           (catch KeeperException$SessionExpiredException e#
-            (.zDisconnect ~'this)
+            (reset! (.client ~'this) nil)
             (throw (ex-info ~emessage {:path (.path ~'this)} e#)))
           (catch KeeperException$ConnectionLossException e#
-            (.zDisconnect ~'this)
+            (reset! (.client ~'this) nil)
             (throw (ex-info ~emessage {:path (.path ~'this)} e#))))))
 
 (deftype ZRef [path client cache validator watches]
@@ -85,7 +85,9 @@
     (.zProcessUpdate this {:path path :event-type ::Boot :keeper-state nil})
     this)
   (zDisconnect [this]
-    (.removeAllWatches @client path Watcher$WatcherType/Data true)
+    (try (with-monitored-client (.removeAllWatches client path Watcher$WatcherType/Data true))
+         (catch org.apache.zookeeper.KeeperException$NoWatcherException e
+           (log/debugf "Watcher on %s was not found during removal." path)))
     (reset! client nil)
     this)
   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
@@ -99,27 +101,27 @@
       :DataWatchRemoved (log/debugf "Data watch on %s removed" path)
       (:NodeDataChanged ::Boot)
       (try
-        (with-monitored-client
-          (when-let [new-z (update (zoo/data client path :watcher (fn [x] (.zProcessUpdate this x)))
-                                   :data *deserialize*)]
-            (let [f (juxt :data (comp :version :stat))
-                  old-z (deref cache)
-                  [old-d old-v :as o] (f old-z)
-                  [new-d new-v :as n] (f new-z)]
-              (validate! @validator new-d)
-              (reset! cache new-z)
-              (let [delta (- new-v old-v)]
-                (cond
-                  (neg? delta) (log/warnf "Received negative version delta [%d -> %d] for %s (%s %s)"
+        (when-let [new-z (with-monitored-client
+                           (update (zoo/data client path :watcher (fn [x] (.zProcessUpdate this x)))
+                                   :data *deserialize*))]
+          (let [f (juxt :data (comp :version :stat))
+                old-z (deref cache)
+                [old-d old-v :as o] (f old-z)
+                [new-d new-v :as n] (f new-z)]
+            (validate! @validator new-d)
+            (reset! cache new-z)
+            (let [delta (- new-v old-v)]
+              (cond
+                (neg? delta) (log/warnf "Received negative version delta [%d -> %d] for %s (%s %s)"
+                                        old-v new-v path event-type keeper-state)
+                (zero? delta) (log/tracef "Received zero version delta [%d -> %d] for %s (%s %s)"
                                           old-v new-v path event-type keeper-state)
-                  (zero? delta) (log/tracef "Received zero version delta [%d -> %d] for %s (%s %s)"
-                                            old-v new-v path event-type keeper-state)
-                  (and (> old-v 1) (> delta 1))
-                  (log/infof "Received non-sequential version delta [%d -> %d] for %s (%s %s)"
-                             old-v new-v path event-type keeper-state)))
-              (future (doseq [[k w] @watches]
-                        (try (w k this o n)
-                             (catch Exception e (log/errorf e "Error in watcher %s" k))))))))
+                (and (> old-v 1) (> delta 1))
+                (log/infof "Received non-sequential version delta [%d -> %d] for %s (%s %s)"
+                           old-v new-v path event-type keeper-state)))
+            (future (doseq [[k w] @watches]
+                      (try (w k this o n)
+                           (catch Exception e (log/errorf e "Error in watcher %s" k)))))))
         (catch clojure.lang.ExceptionInfo e
           (log/infof "No connection while operating on %s" path)
           nil)
@@ -133,13 +135,13 @@
   VersionedUpdate
   (compareVersionAndSet [this current-version newval]
     (validate! @validator newval)
-    (with-monitored-client
-      (boolean (try (let [r (zoo/set-data client path (*serialize* newval) current-version)]
-                      (when r (log/tracef "Set value for %s to %s" path newval current-version))
-                      r)
-                    (catch KeeperException e
-                      (when-not (= (.code e) KeeperException$Code/BADVERSION)
-                        (throw e)))))))
+    (boolean (try (let [r (with-monitored-client
+                            (zoo/set-data client path (*serialize* newval) current-version))]
+                    (when r (log/tracef "Set value for %s to %s" path newval current-version))
+                    r)
+                  (catch KeeperException e
+                    (when-not (= (.code e) KeeperException$Code/BADVERSION)
+                      (throw e))))))
   VersionedDeref
   (vDeref [this] ((juxt :data (comp :version :stat)) @cache))
 
