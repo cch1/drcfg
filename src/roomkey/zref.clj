@@ -1,8 +1,9 @@
 (ns roomkey.zref
   "A Zookeeper-based reference type"
-  (:import [org.apache.zookeeper KeeperException KeeperException$Code
+  (:import [org.apache.zookeeper ZooKeeper KeeperException KeeperException$Code
             KeeperException$SessionExpiredException
-            KeeperException$ConnectionLossException])
+            KeeperException$ConnectionLossException
+            Watcher$WatcherType])
   (:require [zookeeper :as zoo]
             [clojure.string :as string]
             [clojure.tools.logging :as log]))
@@ -50,11 +51,11 @@
   (compareVersionAndSet [this current-version new-value] "Set to new-value only when current-version is latest"))
 
 (defprotocol VersionedDeref
- (vDeref [this] "Return referenced value and version"))
+  (vDeref [this] "Return referenced value and version"))
 
 (defprotocol VersionedWatch
   "A protocol for adding versioned watchers using the same associative storage as \"classic\" watchers"
- (vAddWatch [this k f] "Add versioned watcher that will be called with new value and version"))
+  (vAddWatch [this k f] "Add versioned watcher that will be called with new value and version"))
 
 (defmacro with-monitored-client
   "An unhygenic macro that captures `this` and binds `client` to manage connection issues"
@@ -84,6 +85,7 @@
     (.zProcessUpdate this {:path path :event-type ::Boot :keeper-state nil})
     this)
   (zDisconnect [this]
+    (when-let [c @client] (.removeAllWatches c path Watcher$WatcherType/Data true))
     (reset! client nil)
     this)
   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
@@ -94,6 +96,7 @@
       :None (do (log/debugf "Keeper State event: %s (%s)" keeper-state path)  ; session changes
                 (assert (nil? path') "Keeper State event received with a path"))
       :NodeDeleted (log/warnf "Node %s deleted" path)
+      :DataWatchRemoved (log/debugf "Data watch on %s removed" path)
       (:NodeDataChanged ::Boot)
       (try
         (with-monitored-client
@@ -108,9 +111,9 @@
               (let [delta (- new-v old-v)]
                 (cond
                   (neg? delta) (log/warnf "Received negative version delta [%d -> %d] for %s (%s %s)"
-                                      old-v new-v path event-type keeper-state)
+                                          old-v new-v path event-type keeper-state)
                   (zero? delta) (log/tracef "Received zero version delta [%d -> %d] for %s (%s %s)"
-                                        old-v new-v path event-type keeper-state)
+                                            old-v new-v path event-type keeper-state)
                   (and (> old-v 1) (> delta 1))
                   (log/infof "Received non-sequential version delta [%d -> %d] for %s (%s %s)"
                              old-v new-v path event-type keeper-state)))
@@ -165,7 +168,7 @@
   (compareAndSet [this oldval newval]
     (let [[value version] (.vDeref this)]
       (boolean (and (= oldval value)
-                  (.compareVersionAndSet this version newval)))))
+                    (.compareVersionAndSet this version newval)))))
   (swap [this f]
     (loop [n 1 i *max-update-attempts*]
       (let [[value version] (.vDeref this)
@@ -186,7 +189,7 @@
   [path default & options]
   (let [{validator :validator} (apply hash-map options)
         z (->ZRef path (atom nil) (atom {:data default :stat {:version -1}})
-                 (atom nil) (atom {}))]
+                  (atom nil) (atom {}))]
     (when validator (.setValidator z validator))
     z))
 
