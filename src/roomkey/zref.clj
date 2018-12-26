@@ -190,7 +190,9 @@
             (recur (* 2 n) (dec i)))))))
   (swap [this f x] (.swap this (fn [v] (f v x))))
   (swap [this f x y] (.swap this (fn [v] (f v x y))))
-  (swap [this f x y args] (.swap this (fn [v] (apply f v x y args)))))
+  (swap [this f x y args] (.swap this (fn [v] (apply f v x y args))))
+  java.lang.Object
+  (toString [this] (str (.vDeref this))))
 
 (defn create
   [path default & options]
