@@ -91,10 +91,9 @@
   (zConnect [this client]
     (reset! client-atom client)
     (let [znode-events (async/chan 1)
-          xform (map (fn [zdata] (let [m (:stat zdata)
-                                       obj ((juxt (comp *deserialize* :data) (comp :version :stat)) zdata)]
-                                   (with-meta obj m))))
-          data-changed-events (async/chan 1 xform)]
+          f (fn [zdata] (let [m (:stat zdata)
+                              obj ((juxt (comp *deserialize* :data) (comp :version :stat)) zdata)]
+                          (with-meta obj m)))]
       (async/go-loop [] ; start event listener loop
         (if-let [{:keys [event-type keeper-state] :as event} (async/<! znode-events)]
           (do
@@ -104,34 +103,25 @@
                         (recur))
               :NodeDeleted (log/warnf "Node %s deleted" path)
               :DataWatchRemoved (log/infof "Data watch on %s removed" path)
-              (::Boot :NodeDataChanged) (do
-                                          (async/put! data-changed-events
-                                                      (zoo/data client path :watcher (partial async/put! znode-events)))
+              (::Boot :NodeDataChanged) (let [[value' version' :as n] (f (zoo/data client path :watcher (partial async/put! znode-events)))
+                                              [value version :as o] @cache
+                                              delta (- version' version)]
+                                          (log/infof "*** Got %s" n)
+                                          (cond
+                                            (neg? delta) (log/warnf "Received negative version delta [%d -> %d] for %s" version version' path)
+                                            (zero? delta) (log/tracef "Received zero version delta [%d -> %d] for %s" version version' path)
+                                            (and (> version 1) (> delta 1)) (log/infof "Received non-sequential version delta [%d -> %d] for %s"
+                                                                                       version version' path))
+                                          (if (valid? @validator value')
+                                            (do (reset! cache n)
+                                                (when (pos? version)
+                                                  (async/thread (doseq [[k w] @watches]
+                                                                  (try (w k this o n)
+                                                                       (catch Exception e (log/errorf e "Error in watcher %s" k)))))))
+                                            (log/warnf "Watcher received invalid value [%s], ignoring update for %s" value' path))
                                           (recur))
               (log/warnf "Unexpected event:state [%s:%s] while watching %s" event-type keeper-state path)))
-          (do
-            (log/infof "The znode event channel for %s has closed, shutting down" path)
-            (async/close! data-changed-events))))
-
-      (async/go-loop [] ; start data change listener loop
-        (if-let [[value' version' :as n] (async/<! data-changed-events)]
-          (let [[value version :as o] @cache
-                delta (- version' version)]
-            (log/infof "*** Got %s" n)
-            (cond
-              (neg? delta) (log/warnf "Received negative version delta [%d -> %d] for %s" version version' path)
-              (zero? delta) (log/tracef "Received zero version delta [%d -> %d] for %s" version version' path)
-              (and (> version 1) (> delta 1)) (log/infof "Received non-sequential version delta [%d -> %d] for %s"
-                                                         version version' path))
-            (if (valid? @validator value')
-              (do (reset! cache n)
-                  (when (pos? version)
-                    (async/thread (doseq [[k w] @watches]
-                                    (try (w k this o n)
-                                         (catch Exception e (log/errorf e "Error in watcher %s" k)))))))
-              (log/warnf "Watcher received invalid value [%s], ignoring update for %s" value' path))
-            (recur))
-          (log/infof "The data-changed-events channel has closed, shutting down")))
+          (log/infof "The znode event channel for %s has closed, shutting down" path)))
       (async/put! znode-events {:event-type ::Boot})
       znode-events))
   (zDisconnect [this channel]

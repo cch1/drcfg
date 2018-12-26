@@ -59,8 +59,7 @@
         (let [$z (zref "/zref2" 1)]
           (.zInitialize $z $c)
           (swap! $z inc) => 2
-          (swap! $z inc) => 3
-          (Thread/sleep 1000))))
+          (swap! $z inc) => 3)))
 
 (fact "A connected ZRef is updated by changes at the cluster"
       (let [$z (zref "/myzref" "A")
