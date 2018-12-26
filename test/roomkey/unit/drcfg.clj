@@ -19,7 +19,10 @@
 (fact "open starts zrefs with client specs"
       (open [..zRef1.. ..zRef2..] "cspecs") => ..client..
       (provided
-       (zclient/create (as-checker string?) anything) => ..client..))
+       (zclient/create) => ..client..
+       (z/link ..zRef1.. ..client..) => ..ignored1..
+       (z/link ..zRef2.. ..client..) => ..ignored2..
+       (zclient/open ..client.. (as-checker string?) anything) => ..client..))
 
 (future-fact "status returns status"
              (status #{(atom ..A..) (atom ..B..)}) => (just [["/x/y" false ..A..] ["/y/x" true ..B..]]))

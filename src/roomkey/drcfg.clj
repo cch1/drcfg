@@ -36,14 +36,10 @@
   ([hosts] (open (deref *registry*) hosts))
   ([registry hosts] (open registry hosts nil))
   ([registry hosts scope]
-   (let [ch-source (async/chan)
-         mux (async/mult ch-source)]
-     (doseq [z registry]
-       (let [ch-sink (async/chan 1)]
-         (link z ch-sink)
-         (async/tap mux ch-sink)))
+   (let [zclient (zclient/create)]
+     (doseq [z registry] (z/link z zclient))
      ;; avoid a race condition by having mux wired up before feeding in client events
-     (zclient/create (string/join "/" (filter identity [hosts zk-prefix scope])) ch-source))))
+     (zclient/open zclient (string/join "/" (filter identity [hosts zk-prefix scope])) 16000))))
 
 (defn db-initialize!
   "Synchronously initialize a fresh zookeeper database with a root node"

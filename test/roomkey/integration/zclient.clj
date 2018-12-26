@@ -40,27 +40,29 @@
 (background (around :facts (do ?form)))
 
 (fact "Can create a client and then close it with proper notifications arriving on supplied channel"
-  (let [c (async/chan 1)]
-    (with-open [$c (create $cstring0 c)]
-      $c => (partial instance? ZClient)
-      (async/<!! c) => (just [:SyncConnected (partial instance? ZooKeeper)]))
-    (async/<!! c) => nil?))
+      (let [c (async/chan 1)]
+        (with-open [$c (create)]
+          $c => (partial instance? ZClient)
+          (.open $c $cstring0 5000)
+          (async/<!! (async/tap (.mux $c) c)) => (just [:roomkey.zclient/connected (partial instance? ZooKeeper)]))))
 
 (fact "Can open client to unavailable server"
-  (with-open [$t0 (TestingServer. false)
-              $t1 (TestingServer. (.getPort $t0) false)]
-    (let [$cstring (.getConnectString $t0)
-          $c (async/chan 1)]
-      (with-open [$client (create $cstring $c)]
-        (async/alts!! [$c (async/timeout 2500)]) => (contains [nil])
-        (.start $t0)
-        (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:SyncConnected (partial instance? ZooKeeper)])])
-        (.stop $t0)
-        (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:Disconnected (partial instance? ZooKeeper)])])
-        (.restart $t0)
-        (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:SyncConnected (partial instance? ZooKeeper)])])
-        (.stop $t0)
-        (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:Disconnected (partial instance? ZooKeeper)])])
-        (log/info ">>>>>>>>>> About to start a new server -should trigger expiration of existing sessions <<<<<<")
-        (.start $t1)
-        (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:SyncConnected (partial instance? ZooKeeper)])])))))
+      (with-open [$t0 (TestingServer. false)
+                  $t1 (TestingServer. (.getPort $t0) false)]
+        (let [$cstring (.getConnectString $t0)
+              $c (async/chan 1)
+              $zclient (create)]
+          (with-open [$client (.open $zclient $cstring 5000)]
+            (async/tap (.mux $zclient) $c)
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [nil])
+            (.start $t0)
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])
+            (.stop $t0)
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/disconnected (partial instance? ZooKeeper)])])
+            (.restart $t0)
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])
+            (.stop $t0)
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/disconnected (partial instance? ZooKeeper)])])
+            (log/info ">>>>>>>>>> About to start a new server -should trigger expiration of existing sessions <<<<<<")
+            (.start $t1)
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/expired (partial instance? ZooKeeper)])])))))
