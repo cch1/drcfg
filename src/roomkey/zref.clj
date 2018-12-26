@@ -91,7 +91,10 @@
   (zConnect [this client]
     (reset! client-atom client)
     (let [znode-events (async/chan 1)
-          data-changed-events (async/chan 1 (map (fn [zdata] (update zdata :data *deserialize*))))]
+          xform (map (fn [zdata] (let [m (:stat zdata)
+                                       obj ((juxt (comp *deserialize* :data) (comp :version :stat)) zdata)]
+                                   (with-meta obj m))))
+          data-changed-events (async/chan 1 xform)]
       (async/go-loop [] ; start event listener loop
         (if-let [{:keys [event-type keeper-state] :as event} (async/<! znode-events)]
           (do
@@ -111,8 +114,8 @@
             (async/close! data-changed-events))))
 
       (async/go-loop [] ; start data change listener loop
-        (if-let [zdata' (async/<! data-changed-events)]
-          (let [[[value version :as o] [value' version' :as n]] (map (juxt :data (comp :version :stat)) [@cache zdata'])
+        (if-let [[value' version' :as n] (async/<! data-changed-events)]
+          (let [[value version :as o] @cache
                 delta (- version' version)]
             (log/infof "*** Got %s" n)
             (cond
@@ -121,7 +124,7 @@
               (and (> version 1) (> delta 1)) (log/infof "Received non-sequential version delta [%d -> %d] for %s"
                                                          version version' path))
             (if (valid? @validator value')
-              (do (reset! cache zdata')
+              (do (reset! cache n)
                   (when (pos? version)
                     (async/thread (doseq [[k w] @watches]
                                     (try (w k this o n)
@@ -148,14 +151,14 @@
   (compareVersionAndSet [this current-version newval]
     (.zUpdate this @client-atom current-version newval))
   VersionedDeref
-  (vDeref [this] ((juxt :data (comp :version :stat)) @cache))
+  (vDeref [this] @cache)
 
   VersionedWatch
   (vAddWatch [this k f] (swap! watches assoc k f) this)
 
   clojure.lang.IMeta
   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_timeInZk
-  (meta [this] (-> (.cache this) deref :stat))
+  (meta [this] (meta @cache))
 
   clojure.lang.IDeref
   (deref [this] (-> (.vDeref this) first))
@@ -197,7 +200,7 @@
 (defn create
   [path default & options]
   (let [{validator :validator} (apply hash-map options)
-        z (->ZRef path (atom nil) (atom {:data default :stat {:version -1}})
+        z (->ZRef path (atom nil) (atom (with-meta [default -1] {:version -1}))
                   (atom nil) (atom {}))]
     (when validator (.setValidator z validator))
     z))
