@@ -1,19 +1,54 @@
 (ns roomkey.zclient
   "A resilient and respawning Zookeeper client"
   (:import [org.apache.zookeeper ZooKeeper Watcher WatchedEvent
+            CreateMode
             Watcher$Event$EventType Watcher$Event$KeeperState
             KeeperException KeeperException$Code
             KeeperException$SessionExpiredException
-            KeeperException$ConnectionLossException])
-  (:require [zookeeper :as zoo]
-            [clojure.string :as string]
+            KeeperException$ConnectionLossException
+            KeeperException$NodeExistsException
+            ZooDefs$Ids
+            data.Stat])
+  (:require [clojure.string :as string]
             [clojure.core.async :as async]
             [clojure.tools.logging :as log]))
 
 ;; https://github.com/liebke/zookeeper-clj
 ;; https://github.com/torsten/zookeeper-atom
 
-(defn event-to-map
+(def acls {:open-acl-unsafe ZooDefs$Ids/OPEN_ACL_UNSAFE ; This is a completely open ACL
+           :anyone-id-unsafe ZooDefs$Ids/ANYONE_ID_UNSAFE ; This Id represents anyone
+           :auth-ids ZooDefs$Ids/AUTH_IDS ; This Id is only usable to set ACLs
+           :creator-all-acl ZooDefs$Ids/CREATOR_ALL_ACL ; This ACL gives the creators authentication id's all permissions
+           :read-all-acl ZooDefs$Ids/READ_ACL_UNSAFE ; This ACL gives the world the ability to read
+           })
+
+(def create-modes {;; The znode will not be automatically deleted upon client's disconnect
+                   {:persistent? true, :sequential? false} CreateMode/PERSISTENT
+                   ;; The znode will be deleted upon the client's disconnect, and its name will be appended with a monotonically increasing number
+                   {:persistent? false, :sequential? true} CreateMode/EPHEMERAL_SEQUENTIAL
+                   ;; The znode will be deleted upon the client's disconnect
+                   {:persistent? false, :sequential? false} CreateMode/EPHEMERAL
+                   ;; The znode will not be automatically deleted upon client's disconnect, and its name will be appended with a monotonically increasing number
+                   {:persistent? true, :sequential? true} CreateMode/PERSISTENT_SEQUENTIAL})
+
+(defn- stat-to-map
+  ([^Stat stat]
+   ;;(long czxid, long mzxid, long ctime, long mtime, int version, int cversion, int aversion, long ephemeralOwner, int dataLength, int numChildren, long pzxid)
+   (when stat
+     {:czxid (.getCzxid stat)
+      :mzxid (.getMzxid stat)
+      :ctime (.getCtime stat)
+      :mtime (.getMtime stat)
+      :version (.getVersion stat)
+      :cversion (.getCversion stat)
+      :aversion (.getAversion stat)
+      :ephemeralOwner (.getEphemeralOwner stat)
+      :dataLength (.getDataLength stat)
+      :numChildren (.getNumChildren stat)
+      :pzxid (.getPzxid stat)})))
+
+(defn- event-to-map
   [^WatchedEvent event]
   {:event-type (keyword (.name (.getType event)))
    :keeper-state (keyword (.name (.getState event)))
@@ -31,7 +66,8 @@
   (close [this] "Close the connection"))
 
 (defprotocol ZooKeeperFacing
-  (create-all [this path options] "Create a ZNode at the given path")
+  (create-znode [this path options] "Create a ZNode at the given path")
+  (create-all [this path options] "Create a ZNode at the given path, adding ancestors as required")
   (data [this path options] "Fetch the data from the ZNode at the path")
   (set-data [this path data version options] "Set the data on the ZNode at the given path, asserting the current version"))
 
@@ -84,18 +120,34 @@
     (async/close! raw-client-events)
     this)
   ZooKeeperFacing
+  (create-znode [this path {:keys [data acl persistent? sequential? context callback async?]
+                            :or {persistent? false
+                                 sequential? false
+                                 acl (acls :open-acl-unsafe)
+                                 context path
+                                 async? false}}]
+    (let [create-mode (create-modes {:persistent? persistent?, :sequential? sequential?})]
+      (try (with-client (.create client path data acl create-mode))
+           (catch KeeperException$NodeExistsException e
+             false))))
   (create-all [this path options]
     (loop [result-path "" [dir & children] (rest (string/split path #"/"))]
       (let [result-path (str result-path "/" dir)
-            created? (with-client (if (seq children)
-                                    (zoo/create client result-path :persistent? true)
-                                    (apply zoo/create client result-path (mapcat identity options))))]
+            created? (create-znode this result-path (if (seq children) {:persistent? true} options))]
         (if (seq children)
           (recur result-path children)
           created?))))
-  (data [this path options] (with-client (apply zoo/data client path (mapcat identity options))))
-  (set-data [this path data version options]
-    (boolean (try (with-client (apply zoo/set-data client path data version (mapcat identity options)))
+  (data [this path {:keys [watcher watch? async? callback context]
+                    :or {watch? false
+                         async? false
+                         context path}}]
+    (let [stat (Stat.)]
+      {:data (with-client (.getData client path (if watcher (make-watcher (comp watcher event-to-map)) watch?) stat))
+       :stat (stat-to-map stat)}))
+  (set-data [this path data version {:keys [async? callback context]
+                                     :or {async? false
+                                          context path}}]
+    (boolean (try (with-client (stat-to-map (.setData client path data version)))
                   (catch KeeperException e
                     (when-not (= (.code e) KeeperException$Code/BADVERSION) (throw e))))))
   clojure.lang.IDeref
