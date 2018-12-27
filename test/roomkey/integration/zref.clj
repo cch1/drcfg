@@ -85,13 +85,10 @@
 (fact "A connected ZRef is updated by changes at the cluster"
       (with-open [$c (zclient/create)
                   c (zoo/connect (str connect-string sandbox))]
-        (let [$z (zref "/myzref" "A" $c)
-              sync (promise)]
-          (add-watch $z :sync (fn [& args] (deliver sync args)))
+        (let [$z (zref "/myzref" "A" $c)]
           (zclient/open $c (str connect-string sandbox) 5000)
           $z => (eventually-vrefers-to 1000 ["A" 1])
           (zoo/set-data c "/myzref" (z/*serialize* "B") 1)
-          ;; (deref sync 10000 :promise-never-delivered) => (just [:sync (partial instance? roomkey.zref.ZRef) "A" "B"])
           $z => (eventually-vrefers-to 1000 ["B" 2]))))
 
 (fact "A connected ZRef's watches are called when updated by changes at the cluster"
@@ -146,43 +143,3 @@
           (zoo/delete c "/myzref")
           (compare-and-set! $z "A" "B") => (throws org.apache.zookeeper.KeeperException$NoNodeException)
           $z => (refers-to "A"))))
-
-(future-fact "A disconnected ZRef behaves"
-             (with-open [$c (zclient/create)
-                         ]
-               (let [$z (zref "/myzref" "A" $c)
-                     sync (promise)]
-                 (add-watch $z :sync (fn [& args] (deliver sync args)))
-                 (zclient/open $c (str connect-string sandbox) 500)
-                 (let [c (.zConnect $z $c)]
-                   @sync
-                   (.zDisconnect $z c))
-                 @$z)) => "A")
-
-(future-fact "Disconnected ZRefs are reconnected"
-             (with-open [s (TestingServer. true)]
-               (let [z (zref "/myzref" "A")]
-                 (with-open [c (zoo/connect (.getConnectString s))]
-                   (.zInitialize z c)
-                   (Thread/sleep 1000) ; a watch on the client would remove this silliness
-                   (let [p (promise)]
-                     (add-watch z :sync (fn [& args] (deliver p args)))
-                     (reset! z "B")
-                     (deref p))
-                   z))) => (refers-to "B"))
-
-(future-fact "Non-sequential version updates are OK"
-             (with-open [s (TestingServer. true)]
-               (let [z0 (zref "/myzref" "A")
-                     z1 (zref "/myzref" "A")]
-                 (with-open [c0 (zoo/connect (.getConnectString s))]
-                   (let [c (.zInitialize z0 c0)]
-                     (reset! z0 "B")
-                     (.zDisconnect z0 c)))
-                 (with-open [c1 (zoo/connect (.getConnectString s))]
-                   (.zInitialize z1 c1)
-                   (reset! z1 "C")
-                   (reset! z1 "D")
-                   (.zConnect z0 c1)
-                   (Thread/sleep 1000)
-                   z0)) => (refers-to "D")))
