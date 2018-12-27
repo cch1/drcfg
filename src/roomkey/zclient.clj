@@ -93,7 +93,7 @@
         (if-let [{:keys [event-type keeper-state path] :as event} (async/<! raw-client-events)]
           (do
             (assert (and (nil? path) (= :None event-type)) (format "Received node event %s for path %s on client event handler!" event-type path))
-            (log/infof "Received raw client state event %s" keeper-state)
+            (log/debugf "Received raw client state event %s" keeper-state)
             (case keeper-state
               :SyncConnected (do
                                (async/put! client-events [::connected @client-atom])
@@ -110,7 +110,7 @@
                              (recur)))
               (throw (Exception. (format "Unexpected event: %s" event)))))
           (do
-            (log/infof "The raw client event channel has closed, shutting down")
+            (log/debugf "The raw client event channel has closed, shutting down")
             (.close @client-atom 1000)
             (async/put! client-events [::closed @client-atom])
             (reset! client-atom nil)

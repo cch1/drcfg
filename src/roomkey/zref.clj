@@ -48,9 +48,9 @@
   UpdateableZNode
   (zInitialize [this]
     (try (when (zclient/create-all client path {:persistent? true}) ; idempotent side effects
-           (log/infof "Created node %s" path))
+           (log/debugf "Created node %s" path))
          (when (.zUpdate this 0 (first @cache)) ; idempotent side effects
-           (log/infof "Updated node %s with default value" path))
+           (log/debugf "Updated node %s with default value" path))
          (catch clojure.lang.ExceptionInfo e
            (log/infof e "Lost connection while initializing %s" path)
            false)))
@@ -62,7 +62,7 @@
       (async/go-loop [] ; start event listener loop
         (if-let [{:keys [event-type keeper-state] :as event} (async/<! znode-events)]
           (do
-            (log/infof "** Event [%s:%s] received by %s" event-type keeper-state path)
+            (log/debugf "Event [%s:%s] received by %s" event-type keeper-state path)
             (case event-type
               :None (do (assert (nil? (:path event)) "Keeper State event received with a path!") ; should be handled by default watch on client
                         (recur))
@@ -71,7 +71,6 @@
               (::Boot :NodeDataChanged) (let [[value' version' :as n] (f (zclient/data client path {:watcher (partial async/put! znode-events)}))
                                               [value version :as o] @cache
                                               delta (- version' version)]
-                                          (log/infof "*** Got %s for %s" n path)
                                           (cond
                                             (neg? delta) (log/warnf "Received negative version delta [%d -> %d] for %s" version version' path)
                                             (zero? delta) (log/tracef "Received zero version delta [%d -> %d] for %s" version version' path)
@@ -86,7 +85,7 @@
                                             (log/warnf "Watcher received invalid value [%s], ignoring update for %s" value' path))
                                           (recur))
               (log/warnf "Unexpected event:state [%s:%s] while watching %s" event-type keeper-state path)))
-          (log/infof "The znode event channel for %s has closed, shutting down" path)))
+          (log/debugf "The znode event channel for %s has closed, shutting down" path)))
       (async/put! znode-events {:event-type ::Boot})
       znode-events))
   (zDisconnect [this channel]
@@ -95,7 +94,7 @@
   (zUpdate [this version value]
     (validate! @validator value)
     (let [r (zclient/set-data client path (*serialize* value) version {})]
-      (when r (log/infof "Set value for %s to %s" path value version))
+      (when r (log/debugf "Set value for %s to %s" path value version))
       r))
   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
   ;; https://www.safaribooksonline.com/library/view/zookeeper/9781449361297/ch04.html
@@ -156,7 +155,6 @@
     (async/go-loop [booted? false] ; start event listener loop
       (if-let [[event client] (async/<! events)]
         (do
-          (log/infof "* Event %s received" event)
           (recur (case event
                    ::zclient/started booted?
                    ::zclient/connected (do
@@ -166,7 +164,7 @@
                    ::zclient/disconnected booted? ; be patient
                    ::zclient/expired booted?
                    ::zclient/closed false ; do we need to remove watches?
-                   (log/warnf "Unexpected event [%s] while watching %s" event path))))
+                   (log/warnf "Unexpected event [%s] while processing client events %s" event path))))
         (log/infof "The znode event channel for %s has closed, shutting down" path)))))
 
 (defn create
