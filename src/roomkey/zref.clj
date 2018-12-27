@@ -1,12 +1,6 @@
 (ns roomkey.zref
   "A Zookeeper-based reference type"
-  (:import [org.apache.zookeeper ZooKeeper KeeperException KeeperException$Code
-            KeeperException$SessionExpiredException
-            KeeperException$ConnectionLossException
-            KeeperException$NoWatcherException
-            Watcher$WatcherType])
-  (:require [zookeeper :as zoo]
-            [roomkey.zclient :as zclient]
+  (:require [roomkey.zclient :as zclient]
             [clojure.string :as string]
             [clojure.core.async :as async]
             [clojure.tools.logging :as log]))
@@ -28,16 +22,6 @@
   [validator v]
   (when-not (valid? validator v)
     (throw (IllegalStateException. "Invalid reference state"))))
-
-(defn create-all
-  "Create a node and all of its parents, but without the race conditions."
-  [client path]
-  (loop [result-path "" [dir & children] (rest (string/split path #"/"))]
-    (let [result-path (str result-path "/" dir)
-          created? (zoo/create client result-path :persistent? true)]
-      (if-not (seq children)
-        created?
-        (recur result-path children)))))
 
 ;;; A Reference type persisted in a zookeeper cluster.  The semantics are similar to a Clojure Atom
 ;;; with the following major differences:
@@ -64,22 +48,10 @@
   "A protocol for adding versioned watchers using the same associative storage as \"classic\" watchers"
   (vAddWatch [this k f] "Add versioned watcher that will be called with new value and version"))
 
-(defmacro with-zclient
-  "An unhygenic macro that captures `client` and binds `zclient` to manage connection issues"
-  [& body]
-  (let [emessage "Lost connection while processing ZooKeeper requests"]
-    `(try (if-let [~'zclient (deref ~'client)]
-            ~@body
-            (throw (ex-info "Client unavailable while processing ZooKeeper requests" {:path (.path ~'this)})))
-          (catch KeeperException$SessionExpiredException e# ; watches are deleted on session expiration
-            (throw (ex-info ~emessage {:path (.path ~'this)} e#)))
-          (catch KeeperException$ConnectionLossException e# ; be patient...
-            (throw (ex-info ~emessage {:path (.path ~'this)} e#))))))
-
 (deftype ZRef [path client cache validator watches]
   UpdateableZNode
   (zInitialize [this]
-    (try (when (with-zclient (create-all zclient path)) ; idempotent side effects
+    (try (when (zclient/create-all client path {}) ; idempotent side effects
            (log/infof "Created node %s" path))
          (when (.zUpdate this 0 (first @cache)) ; idempotent side effects
            (log/infof "Updated node %s with default value" path))
@@ -100,7 +72,7 @@
                         (recur))
               :NodeDeleted (log/warnf "Node %s deleted" path)
               :DataWatchRemoved (log/infof "Data watch on %s removed" path)
-              (::Boot :NodeDataChanged) (let [[value' version' :as n] (f (with-zclient (zoo/data zclient path :watcher (partial async/put! znode-events))))
+              (::Boot :NodeDataChanged) (let [[value' version' :as n] (f (zclient/data client path {:watcher (partial async/put! znode-events)}))
                                               [value version :as o] @cache
                                               delta (- version' version)]
                                           (log/infof "*** Got %s for %s" n path)
@@ -126,11 +98,9 @@
     this)
   (zUpdate [this version value]
     (validate! @validator value)
-    (boolean (try (let [r (with-zclient  (zoo/set-data zclient path (*serialize* value) version))]
-                    (when r (log/infof "Set value for %s to %s" path value version))
-                    r)
-                  (catch KeeperException e
-                    (when-not (= (.code e) KeeperException$Code/BADVERSION) (throw e))))))
+    (let [r (zclient/set-data client path (*serialize* value) version {})]
+      (when r (log/infof "Set value for %s to %s" path value version))
+      r))
   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
   ;; https://www.safaribooksonline.com/library/view/zookeeper/9781449361297/ch04.html
 
