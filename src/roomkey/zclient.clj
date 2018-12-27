@@ -10,6 +10,9 @@
             [clojure.core.async :as async]
             [clojure.tools.logging :as log]))
 
+;; https://github.com/liebke/zookeeper-clj
+;; https://github.com/torsten/zookeeper-atom
+
 (defn event-to-map
   [^WatchedEvent event]
   {:event-type (keyword (.name (.getType event)))

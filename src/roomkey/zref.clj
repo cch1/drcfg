@@ -1,12 +1,8 @@
 (ns roomkey.zref
   "A Zookeeper-based reference type"
   (:require [roomkey.zclient :as zclient]
-            [clojure.string :as string]
             [clojure.core.async :as async]
             [clojure.tools.logging :as log]))
-
-;; https://github.com/liebke/zookeeper-clj
-;; https://github.com/torsten/zookeeper-atom
 
 (defn ^:dynamic *deserialize* [b] {:pre [(instance? (Class/forName "[B") b)]} (read-string (String. b "UTF-8")))
 

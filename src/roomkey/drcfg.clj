@@ -2,7 +2,6 @@
   "Dynamic Distributed Run-Time configuration"
   (:require [roomkey.zref :as z]
             [roomkey.zclient :as zclient]
-            [zookeeper :as zoo]
             [clojure.string :as string]
             [clojure.tools.logging :as log]))
 
@@ -28,8 +27,8 @@
   ([hosts scope]
    (let [root (string/join "/" (filter identity ["" zk-prefix scope]))]
      (log/infof "Creating root drcfg node %s for connect string %s" root hosts)
-     (with-open [zc (zoo/connect hosts)]
-       (zoo/create-all zc root :persistent? true)))))
+     (with-open [zc (zclient/open *client* hosts 5000)]
+       (zclient/create-all zc root {:persistent? true})))))
 
 (defn >-
   "Create a config reference with the given name (must be fully specified,
