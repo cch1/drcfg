@@ -64,19 +64,19 @@
                               (binding [*zc* zc]
                                 (let [root (abs-path "")]
                                   (zoo/delete-children *zc* root))
-                                (binding [roomkey.drcfg/*registry* (atom #{})] ?form))))])
+                                (binding [roomkey.drcfg/*client* (zclient/create)] ?form))))])
 
 (fact "Can open and close connections regardless of viability"
-      (with-open [c (open #{} bogus-host)]
+      (with-open [c (open roomkey.drcfg/*client* bogus-host 5000)]
         c => (partial instance? roomkey.zclient.ZClient)) => anything
-      (with-open [c (open #{} connect-string)]
+      (with-open [c (open roomkey.drcfg/*client* connect-string 5000)]
         c => (partial instance? roomkey.zclient.ZClient)) => anything)
 
 (fact "Slaved config value gets updated post-connect"
       (let [p (next-path)
             abs-path (abs-path p)
             la (>- p "V0" :validator string?)]
-        (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
+        (with-open [c (open roomkey.drcfg/*client* connect-string sandbox)]
           (sync-path 5000 abs-path "V0")
           (set-path! abs-path "V1")
           la => (eventually-refers-to 10000 "V1"))))
@@ -85,7 +85,7 @@
       (let [p "/N/0" ; (next-path)
             abs-path (abs-path p)
             la (>- p "V0" :validator string?)]
-        (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
+        (with-open [c (open roomkey.drcfg/*client* connect-string sandbox)]
           (sync-path 5000 abs-path "V0")
           (set-path! abs-path "V1")
           la => (eventually-refers-to 10000 "V1"))))
@@ -97,7 +97,7 @@
             abs-path1 (abs-path n1)
             la0 (>- n0 0 :validator integer?)
             la1 (>- n1 1 :validator integer?)]
-        (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
+        (with-open [c (open roomkey.drcfg/*client* connect-string sandbox)]
           (sync-path 5000 abs-path0 0)
           (sync-path 5000 abs-path1 1)
           (set-path! abs-path0 1)
@@ -107,7 +107,7 @@
       (let [n (next-path)
             abs-path (abs-path n)
             la (>- n 0 :validator integer?)]
-        (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
+        (with-open [c (open roomkey.drcfg/*client* connect-string sandbox)]
           (sync-path 5000 abs-path 0)
           (set-path! abs-path 1)
           la => (eventually-refers-to 10000 1))))
@@ -116,7 +116,7 @@
       (let [n (next-path)
             abs-path (abs-path n)
             la (>- n 0 :validator integer?)]
-        (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
+        (with-open [c (open roomkey.drcfg/*client* connect-string sandbox)]
           (sync-path 5000 abs-path 0)
           (set-path! abs-path "x")
           (sync-path 5000 abs-path "x")
@@ -126,7 +126,7 @@
       (let [n (next-path)
             abs-path (abs-path n)
             la (>- n 0)]
-        (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
+        (with-open [c (open roomkey.drcfg/*client* connect-string sandbox)]
           (sync-path 5000 abs-path 0)
           (set-path! abs-path "x")
           la => (eventually-refers-to 10000 "x")
@@ -145,5 +145,5 @@
          (create-path! abs-path "value")
          (create-path! (str abs-path "/.metadata") {:doc "My Doc"})
          (let [la (>- n "default-value" :meta {:doc "My Default Doc"})]
-           (with-open [c (open @roomkey.drcfg/*registry* connect-string sandbox)]
+           (with-open [c (open roomkey.drcfg/*client* connect-string sandbox)]
              la => (eventually-refers-to 10000 "value")))))

@@ -5,7 +5,7 @@
             [clojure.tools.logging :as log]
             [midje.sweet :refer :all]
             [midje.checking.core :refer [extended-=]])
-  (:import [org.apache.curator.test TestingServer]
+  (:import [org.apache.curator.test TestingServer TestingCluster]
            [org.apache.zookeeper ZooKeeper]
            [roomkey.zclient ZClient]))
 
@@ -37,14 +37,12 @@
                  (do (Thread/sleep 200)
                      (recur (- t 200))))))))
 
-(background (around :facts (do ?form)))
-
-(fact "Can create a client and then close it with proper notifications arriving on supplied channel"
+(fact "Can create a client, open it and then close it with proper notifications arriving on supplied channel"
       (let [c (async/chan 1)]
-        (with-open [$c (create)]
+        (with-open [$c (open (create) $cstring0 5000)]
           $c => (partial instance? ZClient)
-          (.open $c $cstring0 5000)
-          (async/<!! (async/tap (.mux $c) c)) => (just [:roomkey.zclient/connected (partial instance? ZooKeeper)]))))
+          (async/<!! (async/tap $c c)) => (just [:roomkey.zclient/connected (partial instance? ZooKeeper)])
+          $c => (refers-to (partial instance? ZooKeeper)))))
 
 (fact "Can open client to unavailable server"
       (with-open [$t0 (TestingServer. false)
@@ -52,9 +50,9 @@
         (let [$cstring (.getConnectString $t0)
               $c (async/chan 1)
               $zclient (create)]
-          (with-open [$client (.open $zclient $cstring 5000)]
-            (async/tap (.mux $zclient) $c)
-            (async/alts!! [$c (async/timeout 2500)]) => (contains [nil])
+          (async/tap $zclient $c)
+          (with-open [$client (open $zclient $cstring 5000)]
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])])
             (.start $t0)
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])
             (.stop $t0)
@@ -66,3 +64,19 @@
             (log/info ">>>>>>>>>> About to start a new server -should trigger expiration of existing sessions <<<<<<")
             (.start $t1)
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/expired (partial instance? ZooKeeper)])])))))
+
+(fact "Client survives session expiration"
+      (with-open [$t (TestingCluster. 3)]
+        (let [$cstring (.getConnectString $t)
+              $c (async/chan 1)
+              $zclient (create)]
+          (async/tap $zclient $c)
+          (with-open [$client (open $zclient $cstring 500)]
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])])
+            (.start $t)
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])
+            (let [instance (.findConnectionInstance $t @$zclient)]
+              (assert (.killServer $t instance) "Couldn't kill ZooKeeper server instance")
+              (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/disconnected (partial instance? ZooKeeper)])])
+              (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])))
+          (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/closed (partial instance? ZooKeeper)])]))))

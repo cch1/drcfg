@@ -33,13 +33,13 @@
           (log/debugf "Drcfg go-loop for zref %s received: %s" (.path z) m)
           (recur
            (case ev
-           (:ConnectedReadOnly :SyncConnected)
-           (let [state (or paired? (boolean (.zPair z client)))]
-             (.zConnect z)
-             state)
-           :Disconnected (do (.zDisconnect z) paired?)
-           :Expired false
-           (do (log/warnf "[%s] Received unexpected message: " paired? m) paired?))))
+             (:ConnectedReadOnly :SyncConnected)
+             (let [state (or paired? (boolean (.zPair z client)))]
+               (.zConnect z)
+               state)
+             :Disconnected (do (.zDisconnect z) paired?)
+             :Expired false
+             (do (log/warnf "[%s] Received unexpected message: " paired? m) paired?))))
         (do ;; client input channel has closed, we're outta here
           (.zDisconnect z)
           (log/debugf "Client input channel has closed for %s, shutting down" (.path z)))))
@@ -48,8 +48,8 @@
 
 ;; Use public drcfg vars
 (defn ex2 []
-  (binding [roomkey.drcfg/*registry* (atom #{})]
+  (binding [roomkey.drcfg/*client* (atom #{})]
     (let [r (>- "/" nil)
           z (>- $path {})]
-      (with-open [c (open @roomkey.drcfg/*registry* $connect-string)]
+      (with-open [c (open @roomkey.drcfg/*client* $connect-string)]
         (comment >break!)))))

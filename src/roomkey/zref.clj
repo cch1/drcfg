@@ -49,10 +49,10 @@
 ;;;  * The swap operation can fail if there is too much contention for a znode.
 ;;;  * Simple watcher functions are wrapped to ignore the version parameter applied to full-fledged watchers.
 (defprotocol UpdateableZNode
-  (zInitialize [this client] "Initialize the ZooKeeper node backing this zref")
-  (zConnect [this client] "Start online operations with the given client (an instance of org.apache.ZooKeeper)")
+  (zInitialize [this] "Initialize the ZooKeeper node backing this zref")
+  (zConnect [this] "Start online operations")
   (zDisconnect [this channel] "Stop online operations")
-  (zUpdate [this client version value] "Update the znode backing this zref"))
+  (zUpdate [this version value] "Update the znode backing this zref"))
 
 (defprotocol VersionedUpdate
   (compareVersionAndSet [this current-version new-value] "Set to new-value only when current-version is latest"))
@@ -64,11 +64,11 @@
   "A protocol for adding versioned watchers using the same associative storage as \"classic\" watchers"
   (vAddWatch [this k f] "Add versioned watcher that will be called with new value and version"))
 
-(defmacro with-monitored-client
-  "An unhygenic macro that captures `this` and binds `client` to manage connection issues"
+(defmacro with-zclient
+  "An unhygenic macro that captures `client` and binds `zclient` to manage connection issues"
   [& body]
   (let [emessage "Lost connection while processing ZooKeeper requests"]
-    `(try (if-let [~'client (deref (.client-atom ~'this))]
+    `(try (if-let [~'zclient (deref ~'client)]
             ~@body
             (throw (ex-info "Client unavailable while processing ZooKeeper requests" {:path (.path ~'this)})))
           (catch KeeperException$SessionExpiredException e# ; watches are deleted on session expiration
@@ -76,20 +76,17 @@
           (catch KeeperException$ConnectionLossException e# ; be patient...
             (throw (ex-info ~emessage {:path (.path ~'this)} e#))))))
 
-(deftype ZRef [path client-atom cache validator watches]
+(deftype ZRef [path client cache validator watches]
   UpdateableZNode
-  (zInitialize [this client]
-    (try (when (create-all client path) ; idempotent side effects
+  (zInitialize [this]
+    (try (when (with-zclient (create-all zclient path)) ; idempotent side effects
            (log/infof "Created node %s" path))
-         (let [c (.zConnect this client)]
-           (when (.zUpdate this client 0 (.deref this)) ; idempotent side effects
-             (log/infof "Updated node %s with default value" path))
-           c)
+         (when (.zUpdate this 0 (first @cache)) ; idempotent side effects
+           (log/infof "Updated node %s with default value" path))
          (catch clojure.lang.ExceptionInfo e
            (log/infof e "Lost connection while initializing %s" path)
            false)))
-  (zConnect [this client]
-    (reset! client-atom client)
+  (zConnect [this]
     (let [znode-events (async/chan 1)
           f (fn [zdata] (let [m (:stat zdata)
                               obj ((juxt (comp *deserialize* :data) (comp :version :stat)) zdata)]
@@ -103,10 +100,10 @@
                         (recur))
               :NodeDeleted (log/warnf "Node %s deleted" path)
               :DataWatchRemoved (log/infof "Data watch on %s removed" path)
-              (::Boot :NodeDataChanged) (let [[value' version' :as n] (f (zoo/data client path :watcher (partial async/put! znode-events)))
+              (::Boot :NodeDataChanged) (let [[value' version' :as n] (f (with-zclient (zoo/data zclient path :watcher (partial async/put! znode-events))))
                                               [value version :as o] @cache
                                               delta (- version' version)]
-                                          (log/infof "*** Got %s" n)
+                                          (log/infof "*** Got %s for %s" n path)
                                           (cond
                                             (neg? delta) (log/warnf "Received negative version delta [%d -> %d] for %s" version version' path)
                                             (zero? delta) (log/tracef "Received zero version delta [%d -> %d] for %s" version version' path)
@@ -127,9 +124,9 @@
   (zDisconnect [this channel]
     (async/close! channel)
     this)
-  (zUpdate [this client version value]
+  (zUpdate [this version value]
     (validate! @validator value)
-    (boolean (try (let [r (zoo/set-data client path (*serialize* value) version)]
+    (boolean (try (let [r (with-zclient  (zoo/set-data zclient path (*serialize* value) version))]
                     (when r (log/infof "Set value for %s to %s" path value version))
                     r)
                   (catch KeeperException e
@@ -139,7 +136,7 @@
 
   VersionedUpdate
   (compareVersionAndSet [this current-version newval]
-    (.zUpdate this @client-atom current-version newval))
+    (.zUpdate this current-version newval))
   VersionedDeref
   (vDeref [this] @cache)
 
@@ -187,17 +184,7 @@
   java.lang.Object
   (toString [this] (str (.vDeref this))))
 
-(defn create
-  [path default & options]
-  (let [{validator :validator} (apply hash-map options)
-        z (->ZRef path (atom nil) (atom (with-meta [default -1] {:version -1}))
-                  (atom nil) (atom {}))]
-    (when validator (.setValidator z validator))
-    z))
-
-(def ^:deprecated zref create)
-
-(defn- process-client-manager-events
+(defn- process-client-events
   [zref events]
   (let [path (.path zref)]
     (async/go-loop [booted? false] ; start event listener loop
@@ -207,8 +194,8 @@
           (recur (case event
                    ::zclient/started booted?
                    ::zclient/connected (do
-                                         (when (not booted?) (.zInitialize zref client))
-                                         (.zConnect zref client)
+                                         (when (not booted?) (.zInitialize zref))
+                                         (.zConnect zref)
                                          true)
                    ::zclient/disconnected booted? ; be patient
                    ::zclient/expired booted?
@@ -216,12 +203,18 @@
                    (log/warnf "Unexpected event [%s] while watching %s" event path))))
         (log/infof "The znode event channel for %s has closed, shutting down" path)))))
 
-(defn link
-  [zref zclient]
-  (let [client-events (async/chan 1)]
-    (async/tap (.mux zclient) client-events)
-    (process-client-manager-events zref client-events)
-    client-events))
+(defn create
+  [path default zclient & options]
+  (let [{validator :validator} (apply hash-map options)
+        client-events (async/chan 1)
+        z (->ZRef path zclient (atom (with-meta [default -1] {:version -1}))
+                  (atom nil) (atom {}))]
+    (when validator (.setValidator z validator))
+    (async/tap zclient client-events)
+    (process-client-events z client-events)
+    z))
+
+(def ^:deprecated zref create)
 
 (defn versioned-deref
   "Return the current state (value and version) of the zref `z`."

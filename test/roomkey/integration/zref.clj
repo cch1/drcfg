@@ -1,5 +1,7 @@
 (ns roomkey.integration.zref
   (:require [roomkey.zref :refer :all :as z]
+            [roomkey.zclient :as zclient]
+            [clojure.core.async :as async]
             [zookeeper :as zoo]
             [clojure.tools.logging :as log]
             [midje.sweet :refer :all]
@@ -24,6 +26,15 @@
                  (do (Thread/sleep 200)
                      (recur (- t 200))))))))
 
+(defchecker eventually-vrefers-to [timeout expected]
+  (checker [actual]
+           (loop [t timeout]
+             (when (pos? t)
+               (if-let [result (extended-= (.vDeref actual) expected)]
+                 result
+                 (do (Thread/sleep 200)
+                     (recur (- t 200))))))))
+
 (background (around :facts (with-open [c (zoo/connect connect-string)]
                              (zoo/delete-all c sandbox)
                              (zoo/create-all c sandbox :persistent? true)
@@ -34,120 +45,144 @@
     []
     (str "/" (swap! counter inc))))
 
-(fact "Pairing a ZRef and ZClient returns the closable channel"
-      (with-open [$c (zoo/connect (str connect-string sandbox))]
-        (.zConnect (zref "/myzref" "A") $c)) => (partial satisfies? clojure.core.async.impl.protocols/Channel))
+(fact "Connecting a ZRef returns the closable channel"
+      (with-open [$c (zclient/open (zclient/create) (str connect-string sandbox) 5000)]
+        (.zConnect (zref "/myzref" "A" $c))) => (partial satisfies? clojure.core.async.impl.protocols/Channel))
 
 (fact "Initializing a ZRef in a virgin zookeeper creates the node with default data"
-      (with-open [$c (zoo/connect (str connect-string sandbox))]
-        (.zInitialize (zref "/myzref" "A") $c) => truthy)
+      (with-open [$c (zclient/create)]
+        (let [$z (zref "/myzref" "A" $c)]
+          (zclient/open $c (str connect-string sandbox) 500)
+          $z => (eventually-vrefers-to 2000 ["A" 1])))
       (with-open [c (zoo/connect (str connect-string sandbox))]
-        (zoo/data c "/myzref")) => (contains {:data (fn [x] (= "A" (z/*deserialize* x)))
-                                              :stat (contains {:version 1})}))
+        (zoo/data c "/myzref") => (contains {:data (fn [x] (= "A" (z/*deserialize* x)))
+                                             :stat (contains {:version 1})})))
 
 (fact "Can update a connected ZRef"
-      (with-open [$c (zoo/connect (str connect-string sandbox))]
-        (let [$z (zref "/zref0" "A")]
-          (.zInitialize $z $c)
-          (.compareVersionAndSet $z 1 "B") => true
-          (.compareVersionAndSet $z 12 "C") => false)
-        (let [$z (zref "/zref1" "A")]
-          (.zInitialize $z $c)
-          (compare-and-set! $z "Z" "B") => false
-          (compare-and-set! $z "A" "B") => true
-          (reset! $z "C") => "C")
-        (let [$z (zref "/zref2" 1)]
-          (.zInitialize $z $c)
-          (swap! $z inc) => 2
-          (swap! $z inc) => 3)))
+      (with-open [$c (zclient/create)]
+        (let [$z0 (zref "/zref0" "A" $c)
+              $z1 (zref "/zref1" "A" $c)
+              $z2 (zref "/zref2" 1 $c)]
+          (zclient/open $c (str connect-string sandbox) 5000)
+          $z0 => (eventually-vrefers-to 1000 ["A" 1])
+          (.compareVersionAndSet $z0 1 "B") => true
+          $z0 => (eventually-vrefers-to 1000 ["B" 2])
+          (.compareVersionAndSet $z0 12 "C") => false
+
+          $z1 => (eventually-vrefers-to 1000 ["A" 1])
+          (compare-and-set! $z1 "Z" "B") => false
+          (compare-and-set! $z1 "A" "B") => true
+          $z1 => (eventually-vrefers-to 1000 ["B" 2])
+          (reset! $z1 "C") => "C"
+          $z1 => (eventually-vrefers-to 1000 ["C" 3])
+
+          $z2 => (eventually-vrefers-to 1000 [1 1])
+          (swap! $z2 inc) => 2
+          $z2 => (eventually-vrefers-to 1000 [2 2])
+          (swap! $z2 inc) => 3
+          $z2 => (eventually-vrefers-to 1000 [3 3]))))
 
 (fact "A connected ZRef is updated by changes at the cluster"
-      (let [$z (zref "/myzref" "A")
-            sync (promise)]
-        (add-watch $z :sync (fn [& args] (deliver sync args)))
-        (with-open [$c (zoo/connect (str connect-string sandbox))
-                    c (zoo/connect (str connect-string sandbox))]
-          (.zInitialize $z $c)
+      (with-open [$c (zclient/create)
+                  c (zoo/connect (str connect-string sandbox))]
+        (let [$z (zref "/myzref" "A" $c)
+              sync (promise)]
+          (add-watch $z :sync (fn [& args] (deliver sync args)))
+          (zclient/open $c (str connect-string sandbox) 5000)
+          $z => (eventually-vrefers-to 1000 ["A" 1])
           (zoo/set-data c "/myzref" (z/*serialize* "B") 1)
-          (deref sync 10000 :promise-never-delivered) => (just [:sync (partial instance? roomkey.zref.ZRef) "A" "B"])
-          $z => (refers-to "B"))))
+          ;; (deref sync 10000 :promise-never-delivered) => (just [:sync (partial instance? roomkey.zref.ZRef) "A" "B"])
+          $z => (eventually-vrefers-to 1000 ["B" 2]))))
+
+(fact "A connected ZRef's watches are called when updated by changes at the cluster"
+      (with-open [$c (zclient/create)
+                  c (zoo/connect (str connect-string sandbox))]
+        (let [$z (zref "/myzref" "A" $c)
+              sync (promise)]
+          (add-watch $z :sync (fn [& args] (deliver sync args)))
+          (zclient/open $c (str connect-string sandbox) 5000)
+          $z => (eventually-vrefers-to 1000 ["A" 1])
+          (zoo/set-data c "/myzref" (z/*serialize* "B") 1)
+          (deref sync 10000 :promise-never-delivered) => (just [:sync (partial instance? roomkey.zref.ZRef) "A" "B"]))))
 
 (fact "A connected ZRef is not updated by invalid values at the cluster"
-      (with-open [$c (zoo/connect (str connect-string sandbox))]
-        (let [$z (zref "/myzref" "A" :validator string?)
+      (with-open [$c (zclient/create)
+                  c (zoo/connect (str connect-string sandbox))]
+        (let [$z (zref "/myzref" "A" $c :validator string?)
               sync (promise)]
-          (.zInitialize $z $c)
           (add-watch $z :sync (fn [& args] (deliver sync args)))
-          (with-open [c (zoo/connect (str connect-string sandbox))]
-            (zoo/set-data c "/myzref" (z/*serialize* 23) 1))
-          (with-open [c (zoo/connect (str connect-string sandbox))]
-            (zoo/set-data c "/myzref" (z/*serialize* "B") 2))
-          @sync
-          $z)) => (refers-to "B"))
+          (zclient/open $c (str connect-string sandbox) 500)
+          $z => (eventually-vrefers-to 1000 ["A" 1])
+          (zoo/set-data c "/myzref" (z/*serialize* 23) 1)
+          (deref sync 1000 ::not-delivered) => ::not-delivered
+          (zoo/set-data c "/myzref" (z/*serialize* "B") 2)
+          $z => (eventually-vrefers-to 1000 ["B" 3]))))
 
 (fact "Children do not intefere with their parents"
-      (with-open [$c (zoo/connect (str connect-string sandbox))]
-        (let [$zB (zref "/myzref/child" "B" :validator string?)
-              $zA (zref "/myzref" "A" :validator string?)
+      (with-open [$c (zclient/create)
+                  c (zoo/connect (str connect-string sandbox))]
+        (let [$zB (zref "/myzref/child" "B" $c :validator string?)
+              $zA (zref "/myzref" "A" $c :validator string?)
               sync-a (promise)
               sync-b (promise)]
-          (.zInitialize $zB $c)
-          (.zInitialize $zA $c)
+          (zclient/open $c (str connect-string sandbox) 500)
+          $zA => (eventually-vrefers-to 1000 ["A" 1])
+          $zB => (eventually-vrefers-to 1000 ["B" 1])
           (add-watch $zA :sync (fn [& args] (deliver sync-a args)))
           (add-watch $zB :sync (fn [& args] (deliver sync-b args)))
-          (with-open [c (zoo/connect (str connect-string sandbox))]
-            (zoo/set-data c "/myzref" (z/*serialize* "a") 1)
-            (zoo/set-data c "/myzref/child" (z/*serialize* "b") 1))
+          (zoo/set-data c "/myzref" (z/*serialize* "a") 1)
+          (zoo/set-data c "/myzref/child" (z/*serialize* "b") 1)
           @sync-a => (just [:sync (partial instance? roomkey.zref.ZRef) "A" "a"])
           @sync-b => (just [:sync (partial instance? roomkey.zref.ZRef) "B" "b"])
-          $zA => (refers-to "a")
-          $zB => (refers-to "b"))))
+          $zA => (eventually-refers-to 1000 "a")
+          $zB => (eventually-refers-to 1000 "b"))))
 
-(fact "A connected ZRef is updated by deletion at the cluster"
-      (with-open [$c (zoo/connect (str connect-string sandbox))]
-        (let [$z (zref "/myzref" "A")
-              sync (promise)]
-          (.zInitialize $z $c)
-          (add-watch $z :sync (fn [& args] (deliver sync args)))
-          (with-open [c (zoo/connect (str connect-string sandbox))]
-            (zoo/delete c "/myzref"))
-          $z)) => (refers-to "A"))
+(fact "A ZRef deleted at the cluster throws exceptions on update but otherwise behaves"
+      (with-open [$c (zclient/create)
+                  c (zoo/connect (str connect-string sandbox))]
+        (let [$z (zref "/myzref" "A" $c)]
+          (zclient/open $c (str connect-string sandbox) 500)
+          $z => (eventually-vrefers-to 1000 ["A" 1])
+          (zoo/delete c "/myzref")
+          (compare-and-set! $z "A" "B") => (throws org.apache.zookeeper.KeeperException$NoNodeException)
+          $z => (refers-to "A"))))
 
-(fact "A disconnected ZRef behaves"
-      (let [$z (zref "/myzref" "A")
-            sync (promise)]
-        (add-watch $z :sync (fn [& args] (deliver sync args)))
-        (with-open [$c (zoo/connect (str connect-string sandbox))]
-          (.zInitialize $z $c)
-          (let [c (.zConnect $z $c)]
-            @sync
-            (.zDisconnect $z c))
-          @$z)) => "A")
+(future-fact "A disconnected ZRef behaves"
+             (with-open [$c (zclient/create)
+                         ]
+               (let [$z (zref "/myzref" "A" $c)
+                     sync (promise)]
+                 (add-watch $z :sync (fn [& args] (deliver sync args)))
+                 (zclient/open $c (str connect-string sandbox) 500)
+                 (let [c (.zConnect $z $c)]
+                   @sync
+                   (.zDisconnect $z c))
+                 @$z)) => "A")
 
-(fact "Disconnected ZRefs are reconnected"
-      (with-open [s (TestingServer. true)]
-        (let [z (zref "/myzref" "A")]
-          (with-open [c (zoo/connect (.getConnectString s))]
-            (.zInitialize z c)
-            (Thread/sleep 1000) ; a watch on the client would remove this silliness
-            (let [p (promise)]
-              (add-watch z :sync (fn [& args] (deliver p args)))
-              (reset! z "B")
-              (deref p))
-            z))) => (refers-to "B"))
+(future-fact "Disconnected ZRefs are reconnected"
+             (with-open [s (TestingServer. true)]
+               (let [z (zref "/myzref" "A")]
+                 (with-open [c (zoo/connect (.getConnectString s))]
+                   (.zInitialize z c)
+                   (Thread/sleep 1000) ; a watch on the client would remove this silliness
+                   (let [p (promise)]
+                     (add-watch z :sync (fn [& args] (deliver p args)))
+                     (reset! z "B")
+                     (deref p))
+                   z))) => (refers-to "B"))
 
-(fact "Non-sequential version updates are OK"
-      (with-open [s (TestingServer. true)]
-        (let [z0 (zref "/myzref" "A")
-              z1 (zref "/myzref" "A")]
-          (with-open [c0 (zoo/connect (.getConnectString s))]
-            (let [c (.zInitialize z0 c0)]
-              (reset! z0 "B")
-              (.zDisconnect z0 c)))
-          (with-open [c1 (zoo/connect (.getConnectString s))]
-            (.zInitialize z1 c1)
-            (reset! z1 "C")
-            (reset! z1 "D")
-            (.zConnect z0 c1)
-            (Thread/sleep 1000)
-            z0)) => (refers-to "D")))
+(future-fact "Non-sequential version updates are OK"
+             (with-open [s (TestingServer. true)]
+               (let [z0 (zref "/myzref" "A")
+                     z1 (zref "/myzref" "A")]
+                 (with-open [c0 (zoo/connect (.getConnectString s))]
+                   (let [c (.zInitialize z0 c0)]
+                     (reset! z0 "B")
+                     (.zDisconnect z0 c)))
+                 (with-open [c1 (zoo/connect (.getConnectString s))]
+                   (.zInitialize z1 c1)
+                   (reset! z1 "C")
+                   (reset! z1 "D")
+                   (.zConnect z0 c1)
+                   (Thread/sleep 1000)
+                   z0)) => (refers-to "D")))

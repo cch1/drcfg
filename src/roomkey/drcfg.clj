@@ -3,43 +3,24 @@
   (:require [roomkey.zref :as z]
             [roomkey.zclient :as zclient]
             [zookeeper :as zoo]
-            [clojure.core.async :as async]
             [clojure.string :as string]
             [clojure.tools.logging :as log]))
 
 ;;; USAGE:  see /roomkey/README.md
 
-(def ^:dynamic *registry* (atom #{} :validator set?))
+(def ^:dynamic *client* (zclient/create))
+
 (def zk-prefix "drcfg")
 
 (defmacro ns-path [n]
   `(str "/" (str *ns*) "/" ~n))
 
-(defn- link
-  "Link a zref to a client-supplying channel"
-  [z ch]
-  ;; Need a lightweight finite-state machine abstraction here...
-  (async/go-loop []
-    (if-let [[ev client :as m] (async/<! ch)]
-      (do
-        (log/tracef "Drcfg go-loop for zref %s received: %s" (.path z) m)
-        (case ev
-          (:ConnectedReadOnly :SyncConnected) (.zConnect z client)
-          :Disconnected (.zDisconnect z)
-          (log/warnf "[%s] Received unexpected message: " m))
-        (recur))
-      (do ;; client input channel has closed, we're outta here
-        (log/debugf "Client input channel has closed for %s, shutting down" (.path z))
-        (.zDisconnect z)))))
-
 (defn open
-  ([hosts] (open (deref *registry*) hosts))
-  ([registry hosts] (open registry hosts nil))
-  ([registry hosts scope]
-   (let [zclient (zclient/create)]
-     (doseq [z registry] (z/link z zclient))
-     ;; avoid a race condition by having mux wired up before feeding in client events
-     (zclient/open zclient (string/join "/" (filter identity [hosts zk-prefix scope])) 16000))))
+  ([hosts] (open *client* hosts))
+  ([client hosts] (open client hosts nil))
+  ([client hosts scope]
+   ;; avoid a race condition by having mux wired up before feeding in client events
+   (zclient/open client (string/join "/" (filter identity [hosts zk-prefix scope])) 16000)))
 
 (defn db-initialize!
   "Synchronously initialize a fresh zookeeper database with a root node"
@@ -55,9 +36,8 @@
   including leading slash) and default value and record it for future connecting"
   [name default & options]
   {:pre [] :post [(instance? clojure.lang.IRef %)]}
-  (let [z (apply z/zref name default options)]
+  (let [z (apply z/zref name default *client* options)]
     (add-watch z :logger (fn [k r o n] (log/tracef "Value of %s update: old: %s; s" name o n)))
-    (swap! *registry* conj z)
     z))
 
 (defmacro def>-

@@ -8,24 +8,14 @@
 (defchecker refers-to [expected]
   (checker [actual] (extended-= (deref actual) expected)))
 
-(background (around :facts (binding [roomkey.drcfg/*registry* (atom #{})] ?form)))
+(background (around :facts (binding [] ?form)))
 
 (facts ">- returns a ZRefs"
        (>- "/ns/x" 1) => (refers-to 1)
        (provided
-        (z/zref "/ns/x" 1) => (atom 1))
-       *registry* => (refers-to (just #{(refers-to 1)})))
+        (z/zref "/ns/x" 1 roomkey.drcfg/*client*) => (atom 1)))
 
 (fact "open starts zrefs with client specs"
-      (open [..zRef1.. ..zRef2..] "cspecs") => ..client..
+      (open ..client.. "cspecs") => ..client..
       (provided
-       (zclient/create) => ..client..
-       (z/link ..zRef1.. ..client..) => ..ignored1..
-       (z/link ..zRef2.. ..client..) => ..ignored2..
        (zclient/open ..client.. (as-checker string?) anything) => ..client..))
-
-(future-fact "status returns status"
-             (status #{(atom ..A..) (atom ..B..)}) => (just [["/x/y" false ..A..] ["/y/x" true ..B..]]))
-
-(future-fact "status-report reports status"
-             (status-report #{(atom ..A..) (atom ..B..)}) => string?)
