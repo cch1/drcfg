@@ -8,7 +8,7 @@
 
 (defn ^:dynamic *serialize* [obj] {:post [(instance? (Class/forName "[B") %)]} (.getBytes (binding [*print-dup* true] (pr-str obj))))
 
-(def ^:dynamic *max-update-attempts* 50)
+(def ^:dynamic *max-update-attempts* 10)
 
 (defn- valid?
   [validator v]
