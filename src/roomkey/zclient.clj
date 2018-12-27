@@ -2,7 +2,9 @@
   "A resilient and respawning Zookeeper client"
   (:import [org.apache.zookeeper ZooKeeper Watcher WatchedEvent
             Watcher$Event$EventType Watcher$Event$KeeperState
-            KeeperException KeeperException$Code])
+            KeeperException KeeperException$Code
+            KeeperException$SessionExpiredException
+            KeeperException$ConnectionLossException])
   (:require [zookeeper :as zoo]
             [clojure.string :as string]
             [clojure.core.async :as async]
@@ -30,17 +32,17 @@
   (data [this path options] "Fetch the data from the ZNode at the path")
   (set-data [this path data version options] "Set the data on the ZNode at the given path, asserting the current version"))
 
-(defmacro with-zclient
-  "An unhygenic macro that captures `client` and binds `zclient` to manage connection issues"
+(defmacro with-client
+  "An unhygenic macro that captures `client-atom` and `path` & binds `client` to manage connection issues"
   [& body]
   (let [emessage "Lost connection while processing ZooKeeper requests"]
-    `(try (if-let [~'zclient (deref ~'client)]
+    `(try (if-let [~'client (deref ~'client-atom)]
             ~@body
-            (throw (ex-info "Client unavailable while processing ZooKeeper requests" {:path (.path ~'this)})))
+            (throw (ex-info "Client unavailable while processing ZooKeeper requests" {:path ~'path})))
           (catch KeeperException$SessionExpiredException e# ; watches are deleted on session expiration
-            (throw (ex-info ~emessage {:path (.path ~'this)} e#)))
+            (throw (ex-info ~emessage {:path ~'path} e#)))
           (catch KeeperException$ConnectionLossException e# ; be patient...
-            (throw (ex-info ~emessage {:path (.path ~'this)} e#))))))
+            (throw (ex-info ~emessage {:path ~'path} e#))))))
 
 (deftype ZClient [client-atom raw-client-events client-events mux]
   Connectable
@@ -82,13 +84,15 @@
   (create-all [this path options]
     (loop [result-path "" [dir & children] (rest (string/split path #"/"))]
       (let [result-path (str result-path "/" dir)
-            created? (zoo/create @client-atom result-path :persistent? true)]
-        (if-not (seq children)
-          created?
-          (recur result-path children)))))
-  (data [this path options] (apply zoo/data @client-atom path (mapcat identity options)))
+            created? (with-client (if (seq children)
+                                    (zoo/create client result-path :persistent? true)
+                                    (apply zoo/create client result-path (mapcat identity options))))]
+        (if (seq children)
+          (recur result-path children)
+          created?))))
+  (data [this path options] (with-client (apply zoo/data client path (mapcat identity options))))
   (set-data [this path data version options]
-    (boolean (try (apply zoo/set-data @client-atom path data version (mapcat identity options))
+    (boolean (try (with-client (apply zoo/set-data client path data version (mapcat identity options)))
                   (catch KeeperException e
                     (when-not (= (.code e) KeeperException$Code/BADVERSION) (throw e))))))
   clojure.lang.IDeref

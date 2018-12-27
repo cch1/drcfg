@@ -51,7 +51,7 @@
 (deftype ZRef [path client cache validator watches]
   UpdateableZNode
   (zInitialize [this]
-    (try (when (zclient/create-all client path {}) ; idempotent side effects
+    (try (when (zclient/create-all client path {:persistent? true}) ; idempotent side effects
            (log/infof "Created node %s" path))
          (when (.zUpdate this 0 (first @cache)) ; idempotent side effects
            (log/infof "Updated node %s with default value" path))
