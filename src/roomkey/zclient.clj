@@ -54,7 +54,7 @@
    :keeper-state (keyword (.name (.getState event)))
    :path (.getPath event)})
 
-(defn ^Watcher make-watcher
+(defn- ^Watcher make-watcher
   [f]
   (reify Watcher
     (process [this event]
@@ -83,14 +83,15 @@
           (catch KeeperException$ConnectionLossException e# ; be patient...
             (throw (ex-info ~emessage {:path ~'path} e#))))))
 
-(deftype ZClient [client-atom raw-client-events client-events mux]
+(deftype ZClient [commands client-atom client-events mux]
   Connectable
   (open [this connect-string timeout] ; TODO: allow parameterization of ZooKeeper instantiation
-    (let [client-watcher (make-watcher (partial async/put! raw-client-events))]
+    (let [raw-client-events (async/chan 1 (map event-to-map))
+          client-watcher (make-watcher (partial async/put! raw-client-events))]
       (reset! client-atom (ZooKeeper. connect-string timeout client-watcher (boolean true)))
       (async/put! client-events [::started @client-atom])
       (async/go-loop []
-        (if-let [{:keys [event-type keeper-state path] :as event} (async/<! raw-client-events)]
+        (if-let [{:keys [event-type keeper-state path] :as event} (async/alt! raw-client-events ([v] v) commands nil)]
           (do
             (assert (and (nil? path) (= :None event-type)) (format "Received node event %s for path %s on client event handler!" event-type path))
             (log/debugf "Received raw client state event %s" keeper-state)
@@ -110,14 +111,13 @@
                              (recur)))
               (throw (Exception. (format "Unexpected event: %s" event)))))
           (do
-            (log/debugf "The raw client event channel has closed, shutting down")
+            (log/debugf "Event processing closed")
             (.close @client-atom 1000)
             (async/put! client-events [::closed @client-atom])
-            (reset! client-atom nil)
-            (async/close! client-events)))))
+            (reset! client-atom nil)))))
     this)
   (close [this]
-    (async/close! raw-client-events)
+    (async/put! commands ::close)
     this)
   ZooKeeperFacing
   (create-znode [this path {:keys [data acl persistent? sequential? context callback async?]
@@ -161,5 +161,5 @@
   []
   {:pre []}
   (let [client-events (async/chan 1)
-        raw-client-events (async/chan 1 (map event-to-map))]
-    (->ZClient (atom nil) raw-client-events client-events (async/mult client-events))))
+        commands (async/chan 1 (filter #{::close}))]
+    (->ZClient commands (atom nil) client-events (async/mult client-events))))

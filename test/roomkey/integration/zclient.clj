@@ -80,3 +80,38 @@
               (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/disconnected (partial instance? ZooKeeper)])])
               (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])))
           (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/closed (partial instance? ZooKeeper)])]))))
+
+(fact "Client can be stopped and restarted"
+      (with-open [$t (TestingServer.)]
+        (let [$c (async/chan 1)
+              $zclient (create)]
+          (async/tap $zclient $c)
+          (with-open [$client (open $zclient (.getConnectString $t) 5000)]
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])])
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])]))
+          (async/alts!! [$c (async/timeout 4500)]) => (contains [(just [:roomkey.zclient/closed (partial instance? ZooKeeper)])])
+          (with-open [$client (open $zclient (.getConnectString $t) 5000)]
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])])
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])]))
+          (async/alts!! [$c (async/timeout 4500)]) => (contains [(just [:roomkey.zclient/closed (partial instance? ZooKeeper)])]))))
+
+(fact "Client can be stopped and restarted across disparate connections"
+      (with-open [$t0 (TestingServer. false)
+                  $t1 (TestingServer. false)]
+        (let [$c (async/chan 1)
+              $zclient (create)]
+          (async/tap $zclient $c)
+          (with-open [$client (open $zclient (.getConnectString $t0) 5000)]
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])])
+            (.start $t0)
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])
+            (.stop $t0)
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/disconnected (partial instance? ZooKeeper)])]))
+          (async/alts!! [$c (async/timeout 4500)]) => (contains [(just [:roomkey.zclient/closed (partial instance? ZooKeeper)])])
+          (with-open [$client (open $zclient (.getConnectString $t1) 5000)]
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])])
+            (.start $t1)
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])
+            (.stop $t1)
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/disconnected (partial instance? ZooKeeper)])]))
+          (async/alts!! [$c (async/timeout 4500)]) => (contains [(just [:roomkey.zclient/closed (partial instance? ZooKeeper)])]))))
