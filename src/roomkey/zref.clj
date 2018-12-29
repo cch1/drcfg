@@ -56,7 +56,9 @@
            false)))
   (zConnect [this]
     (let [znode-events (async/chan 1)
-          f (fn [zdata] (let [m (:stat zdata)
+          f (fn [zdata] (let [m (-> (:stat zdata)
+                                    (update :ctime #(java.time.Instant/ofEpochMilli %))
+                                    (update :mtime #(java.time.Instant/ofEpochMilli %)))
                               obj ((juxt (comp *deserialize* :data) (comp :version :stat)) zdata)]
                           (with-meta obj m)))]
       (async/go-loop [] ; start event listener loop
