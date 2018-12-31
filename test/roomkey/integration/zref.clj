@@ -46,8 +46,11 @@
     (str "/" (swap! counter inc))))
 
 (fact "Connecting a ZRef returns the closable channel"
-      (with-open [$c (zclient/open (zclient/create) (str connect-string sandbox) 5000)]
-        (.zConnect (zref "/myzref" "A" $c))) => (partial satisfies? clojure.core.async.impl.protocols/Channel))
+      (let [$c (zclient/create)
+            $z (zref "/myzref" "A" $c)]
+        (with-open [$c (zclient/open $c (str connect-string sandbox) 5000)]
+          (.zConnect $z) => (partial satisfies? clojure.core.async.impl.protocols/Channel)
+          $z => (eventually-vrefers-to 2000 ["A" 1]))))
 
 (fact "Initializing a ZRef in a virgin zookeeper creates the node with default data"
       (with-open [$c (zclient/create)]

@@ -154,18 +154,18 @@
 (defn- process-client-events
   [zref events]
   (let [path (.path zref)]
-    (async/go-loop [booted? false] ; start event listener loop
+    (async/go-loop [[booted? znode-events] [false nil]] ; start event listener loop
       (if-let [[event client] (async/<! events)]
         (do
           (recur (case event
-                   ::zclient/started booted?
+                   ::zclient/started [booted? znode-events]
                    ::zclient/connected (do
                                          (when (not booted?) (.zInitialize zref))
-                                         (.zConnect zref)
-                                         true)
-                   ::zclient/disconnected booted? ; be patient
-                   ::zclient/expired booted?
-                   ::zclient/closed false ; do we need to remove watches?
+                                         [true (.zConnect zref)])
+                   ::zclient/disconnected [booted? znode-events] ; be patient
+                   ::zclient/expired [booted? znode-events]
+                   ::zclient/closed (do (.zDisconnect zref events)
+                                        [false nil]) ; do we need to remove watches?
                    (log/warnf "Unexpected event [%s] while processing client events %s" event path))))
         (log/infof "The znode event channel for %s has closed, shutting down" path)))))
 
