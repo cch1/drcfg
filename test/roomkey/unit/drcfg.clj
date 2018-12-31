@@ -13,7 +13,7 @@
 (facts ">- returns a ZRefs"
        (>- "/ns/x" 1) => (refers-to 1)
        (provided
-        (z/zref "/ns/x" 1 roomkey.drcfg/*client*) => (atom 1)))
+        (z/create "/ns/x" 1 roomkey.drcfg/*client*) => (atom 1)))
 
 (fact "open starts zrefs with client specs"
       (open ..client.. "cspecs") => ..client..

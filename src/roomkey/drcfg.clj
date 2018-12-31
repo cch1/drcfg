@@ -35,7 +35,7 @@
   including leading slash) and default value and record it for future connecting"
   [name default & options]
   {:pre [] :post [(instance? clojure.lang.IRef %)]}
-  (let [z (apply z/zref name default *client* options)]
+  (let [z (apply z/create name default *client* options)]
     (add-watch z :logger (fn [k r o n] (log/tracef "Value of %s update: old: %s; s" name o n)))
     z))
 
