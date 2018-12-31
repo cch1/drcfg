@@ -16,7 +16,7 @@ Copyright (C) 2016 [RoomKey](http://www.roomkey.com)
 ### Design Objectives
 1. Provide a run-time distributed data element -the ZRef.
 2. Provide high resiliency -including reasonable operation when no zookeeper node is available at all (such as airplane mode).
-3. To the extent possible, implement the interfaces of Clojure's own atom on a ZRef:
+3. To the extent possible, implement the interfaces of Clojure's own atom on a ZRef: watches, validators, etc.
 4. Expose the Zookeeper [stat](https://zookeeper.apache.org/doc/current/zookeeperProgrammers.html#sc_zkStatStructure) data through metadata on the ZRef.
 5. Support updates using both Clojure's own native ref-updating functions (`swap!`, `reset!`, etc) as well as functions that leverage ZooKeeper's innate versioned updates.
 5. Support arbitrary metadata through an auxilliary ZRef (stored in a child path `.metadata`)
@@ -26,7 +26,7 @@ Copyright (C) 2016 [RoomKey](http://www.roomkey.com)
 
 When using the `def>-` macro, drcfg stores values in zookeeper at the path `/drcfg/<*ns*>/<varname>` where `*ns*` is the namespace of the module that defines the var.
 
-When using the `def>-` macro, drcfg will also creates a `.metadata` zookeeper node under the defined node containing any metadata (hopefully including a doc string as described below).  If no metadata is provided, the node is not created.  Note that normal metadata on the reference object is represented by the ZooKeeper stat data structure.
+When using the `def>-` macro, drcfg will also creates a `.metadata` zookeeper node under the defined node containing any metadata (hopefully including a doc string as described below).  If no metadata is provided, the node is not created.  Note that normal metadata on the reference object contains the ZooKeeper Stat data structure.
 
 ### drcfg usage
 
@@ -46,19 +46,19 @@ This will create a var whose value is a ZRef associated with the ZooKeeper node 
 and the metadata on the ZRef (not the var) will be truncated:
 
 	(meta myz) => {:verison -1}
+	
+ZRefs are bound to the default ZooKeeper client (`drcfg/*zclient*) which can be overridden if required.
 
-At some later time, the application should open a connection to the ZooKeeper cluster so that ZRefs can be updated with their persisted values:
+At some later time, the application should open the client's connection to the ZooKeeper cluster so that ZRefs can be updated with their persisted values:
 
 ``` Clojure
 (ns my.init
   (:require [roomkey.drcfg :as drcfg]))
 
-(def zclient (atom nil))
-
-(reset! zclient (drcfg/open "zk1.my.co:2181,zk2.my.co:2181,zk3.my.co:2181"))
+(drcfg/open drcfg/*client* "zk1.my.co:2181,zk2.my.co:2181,zk3.my.co:2181")
 ```
 
-This will create a `ZClient` ZooKeeper client (which is stored in `zclient`) and open a connection to the specified ZooKeeper cluster.  Upon connection, all previously created ZRefs will be linked to their cooresponding ZooKeeper nodes.  The client should be retained for eventual cleanup.  Note that the prefix `"drcfg"` is automatically added to the provided ZooKeeper connection string.
+This will open a connection to the specified ZooKeeper cluster.  Upon connection, all previously created ZRefs will be linked to their cooresponding ZooKeeper nodes.  The returned client should be retained for eventual closing.  Note that the prefix `"drcfg"` is automatically added to the provided ZooKeeper connection string to effectively scope the drcfg nodes.
 
 During linking, if not already set, a default value of `"default"` will be set on the node `/drcfg/my.name.space/myz`.  If the node already has a value set (e.g. `"foo"`), it will update the ZRef, causing subsequent dereferencing to yield the updated value:
 
@@ -70,23 +70,23 @@ Metadata too is updated:
 
 From this point on, a ZooKeeper watch is kept on the associated node and any updates will be reflected in `myz`.
 
-When the application shuts down, you should release resources associated with the previously created ZClient:
+When the application shuts down, you should release resources associated with the previously opened ZClient:
 
-	(.close @zclient)
+	(.close zclient)
 
-Note that the opening and closing of the ZClient can be neatly managed by state management tools from Clojure's `with-open` through complete systems like [component](https://github.com/stuartsierra/component).
+Note that the opening and closing of the ZClient can be neatly managed by state management tools from Clojure's `with-open` or through complete systems like [component](https://github.com/stuartsierra/component).
 
 #### Writes
 ZRefs can be updated in the same fashion as Clojure's own atom.  Updates are written *synchronously* to the cluster.  See the section below on protocols for enhanced usage with versioning semantics.
 
 ### Dependencies
 
-The current version of drcfg has dropped Apache Curator in favor of direct use of the [official java ZooKeeper library](http://zookeeper.apache.org/releases.html#download) and [zookeeper-clj](https://github.com/liebke/zookeeper-clj).  In addition, Clojure's [core.async](https://clojure.github.io/core.async/index.html) is used to manage communication of connectivity events between a ZRef and its ZClient.
+The current version of drcfg has dropped Apache Curator in favor of direct use of the [official java ZooKeeper library](http://zookeeper.apache.org/releases.html#download).  In addition, Clojure's [core.async](https://clojure.github.io/core.async/index.html) is used to manage communication of connectivity events between a ZRef and its ZClient.
 
 ### Global State
 The `def>-` macro (obviously) adds a var to the current namespace.  If you prefer to create a local binding to a ZRef, you can use the `roomkey.drcfg/>-` function.
 
-In addition to creating the var, the `def>-` macro and `>-` function adds their ZRef value to, `roomkey.drcfg/*registry*`, a set of ZRefs that should be linked to their corrsponding nodes when a connection to the ZooKeeper cluster is established.  This state is required because `def>-` is intended to be used in top-level forms in Clojure code, **and** because the connection to a ZooKeeper cluster is unlikely to be established at that time, it is important to track the ZRefs for eventual connection later in the application's startup.  If you prefer to manage the linking of ZRefs to ZClients yourself, the `roomkey.drcfg/open` command has an arity that allows the developer to supply a collection of ZRefs.
+In addition to creating the var, the `def>-` macro and `>-` function bind their created ZRef value to, `roomkey.drcfg/*client*`.  This state is required because `def>-` is intended to be used in top-level forms in Clojure code, **and** because the connection to a ZooKeeper cluster is unlikely to be established at that time, it is important to track the ZRefs for eventual connection later in the application's startup.  If you prefer to manage the linking of ZRefs to ZClients yourself, the `roomkey.drcfg/open` command has an arity that allows the developer to supply a ZClient.
 
 ### Monitoring/Admin
 http://zookeeper.apache.org/doc/r3.5.1-alpha/zookeeperAdmin.html#sc_zkCommands
