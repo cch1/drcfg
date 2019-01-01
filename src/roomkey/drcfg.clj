@@ -3,8 +3,7 @@
   (:require [roomkey.zref :as z]
             [roomkey.zclient :as zclient]
             [clojure.string :as string]
-            [clojure.tools.logging :as log]
-            [clojure.tools.macro :refer [name-with-attributes]]))
+            [clojure.tools.logging :as log]))
 
 ;;; USAGE:  see /roomkey/README.md
 
@@ -45,12 +44,11 @@
   automatically prepended to create the zookeeper path -when refactoring, note
   that the namespace may change, leaving the old values stored in zookeeper
   orphaned and reverting to the default value."
-  [name & body]
-  (let [[sym [default & {m :meta :as options}]] (name-with-attributes name body)
-        nstr (str sym)
-        m (merge (meta sym) m)
-        options (select-keys options [:validator])]
-    `(def ~sym (let [bpath# (ns-path ~nstr)
-                     bref# (apply >- bpath# ~default (mapcat identity ~options))]
-                 (when ~m (>- (str bpath# "/.metadata") ~m))
-                 bref#))))
+  [name default & options]
+  (let [nstr (str name)
+        {m :meta :as o} (apply hash-map options)]
+    `(def ~name (let [bpath# (ns-path ~nstr)
+                      bref# (apply >- bpath# ~default (mapcat identity
+                                                              (select-keys (hash-map ~@options) [:validator])))]
+                  (when ~m (>- (str bpath# "/.metadata") ~m))
+                  bref#))))
