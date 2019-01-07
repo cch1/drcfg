@@ -5,10 +5,9 @@
             [zookeeper :as zoo]
             [clojure.tools.logging :as log]
             [midje.sweet :refer :all]
-            [midje.checking.core :refer [detailed-extended-= extended-= as-data-laden-falsehood extended-false? extended-true?]])
+            [midje.checking.core :refer [extended-=]])
   (:import [org.apache.curator.test TestingServer]))
 
-(def bogus-host "127.1.1.1:9999")
 (def test-server (TestingServer. true))
 (def connect-string (.getConnectString test-server))
 
