@@ -21,9 +21,8 @@
         obj ((juxt (comp *deserialize* :data) (comp :version :stat)) zdata)]
     (with-meta obj m)))
 
-(defn- zdata-xform
-  [v]
-  (comp (map process-zdata)))
+(def zdata-xform
+  (map process-zdata))
 
 ;;; A proxy for a znode in a zookeeper cluster.
 ;;; * While offline (before the client connects) or online, a local tree can be created:
@@ -68,7 +67,7 @@
     (set! initial-value v)
     this)
   (create-child [this n v]
-    (let [data-events (async/chan (async/sliding-buffer 2) (zdata-xform v))]
+    (let [data-events (async/chan (async/sliding-buffer 2) zdata-xform)]
       (ZNode. client this n v (atom #{}) data-events)))
   (update-or-create-child [this n v]
     (if-let [existing (get this n)]
@@ -94,7 +93,7 @@
               :NodeDeleted (log/warnf "Node %s deleted" (str this))
               :DataWatchRemoved (log/infof "Data watch on %s removed" (str this))
               :NodeDataChanged (do
-                                 (async/>! data-events (zclient/data client (path this) {:watcher (partial async/put! znode-events)}))
+                                 (async/>! data-events (log/spy :trace (zclient/data client (path this) {:watcher (partial async/put! znode-events)})))
                                  (recur cze))
               :NodeChildrenChanged (let [segments' (into #{}
                                                          (map (fn [p] (last (string/split p #"/"))))
@@ -176,7 +175,7 @@
   "Create a root znode and watch for client status changes to manage watches"
   ([zclient] (create-root zclient ::root))
   ([zclient initial-value]
-   (let [data-events (async/chan (async/sliding-buffer 2) (zdata-xform initial-value))
+   (let [data-events (async/chan (async/sliding-buffer 2) zdata-xform)
          z (->ZNode zclient nil "" initial-value (atom #{}) data-events)]
      (watch-client z zclient)
      z)))
