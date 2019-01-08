@@ -23,8 +23,7 @@
 
 (defn- zdata-xform
   [v]
-  (comp (map process-zdata)
-        (drop-while (fn [[value version]] (and (zero? version) (= value v))))))
+  (comp (map process-zdata)))
 
 ;;; A proxy for a znode in a zookeeper cluster.
 ;;; * While offline (before the client connects) or online, a local tree can be created:
