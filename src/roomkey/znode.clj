@@ -95,7 +95,7 @@
               :NodeDeleted (log/warnf "Node %s deleted" (str this))
               :DataWatchRemoved (log/infof "Data watch on %s removed" (str this))
               :NodeDataChanged (do
-                                 (async/>! (.-data-events this) (zclient/data client (path this) {:watcher (partial async/put! znode-events)}))
+                                 (async/>! data-events (zclient/data client (path this) {:watcher (partial async/put! znode-events)}))
                                  (recur cze))
               :NodeChildrenChanged (let [segments' (into #{}
                                                          (map (fn [p] (last (string/split p #"/"))))
