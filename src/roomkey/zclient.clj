@@ -113,9 +113,7 @@
               (throw (Exception. (format "Unexpected event: %s" event)))))
           (do
             (log/debugf "Event processing closed")
-            (.close @client-atom 1000)
-            (async/put! client-events [::closed @client-atom])
-            (reset! client-atom nil)))))
+            (async/put! client-events [::closed (swap! client-atom (fn [client] (when client (.close client 1000)) client))])))))
     this)
   (close [this]
     (async/put! commands ::close)
