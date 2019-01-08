@@ -157,9 +157,9 @@
   clojure.lang.IDeref
   (deref [this] (deref client-atom))
   clojure.core.async.Mult
-  (tap* [m ch close?] (async/tap mux ch close?))
-  (untap* [m ch] (async/untap mux ch))
-  (untap-all* [m] (async/untap-all mux)))
+  (tap* [m ch close?] (async/tap* mux ch close?))
+  (untap* [m ch] (async/untap* mux ch))
+  (untap-all* [m] (async/untap-all* mux)))
 
 (defn create
   []
