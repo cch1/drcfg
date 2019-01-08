@@ -168,7 +168,7 @@
                  ::zclient/connected (do
                                        (actualize this) ; root triggers blocking recursive actualization of tree
                                        (open this))
-                 ::zclient/closed (async/close! znode-events)
+                 ::zclient/closed (when znode-events (async/close! znode-events)) ; failed connections start but don't connect before closing?
                  znode-events))
         (log/infof "The client event channel for %s has closed, shutting down" (path this))))))
 
