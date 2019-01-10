@@ -18,11 +18,11 @@
   (let [m (-> (:stat zdata)
               (update :ctime #(java.time.Instant/ofEpochMilli %))
               (update :mtime #(java.time.Instant/ofEpochMilli %)))
-        obj ((juxt (comp *deserialize* :data) (comp :version :stat)) zdata)]
-    (with-meta obj m)))
+        value ((comp *deserialize* :data) zdata)]
+    {::type ::datum ::value value ::version (:version m)}))
 
 (def zdata-xform
-  (map process-zdata))
+  (comp (map process-zdata)))
 
 ;;; A proxy for a znode in a zookeeper cluster.
 ;;; * While offline (before the client connects) or online, a local tree can be created:
@@ -56,7 +56,7 @@
 ;; http://spootnik.org/entries/2014/11/06/playing-with-clojure-core-interfaces/index.html
 ;; https://github.com/clojure/data.priority-map/blob/master/src/main/clojure/clojure/data/priority_map.clj
 
-(deftype ZNode [client parent name ^:volatile-mutable initial-value children data-events]
+(deftype ZNode [client parent name ^:volatile-mutable initial-value children events]
   VirtualNode
   (path [this]
     (let [p (str (when parent (.path parent)) "/" name)]
@@ -67,8 +67,8 @@
     (set! initial-value v)
     this)
   (create-child [this n v]
-    (let [data-events (async/chan (async/sliding-buffer 2) zdata-xform)]
-      (ZNode. client this n v (atom #{}) data-events)))
+    (let [events (async/chan (async/sliding-buffer 4))]
+      (ZNode. client this n v (atom #{}) events)))
   (update-or-create-child [this n v]
     (if-let [existing (get this n)]
       (if (= v ::placeholder) existing (overlay existing v))
@@ -78,11 +78,14 @@
   BackedZNode
   (actualize [this] ; Recursively create the node and its children, each @ version zero, if not already present
     (when (zclient/create-znode client (path this) {:persistent? true :data (*serialize* initial-value)})
+      (async/>!! events {::type ::actualized! ::value initial-value})
       (log/infof "Actualized %s" (str this)))
     (doseq [child @children] (actualize child)))
   (open [this]
     (log/debugf "Opening %s" (str this))
-    (let [znode-events (async/chan 1)]
+    (let [znode-events (async/chan 1)
+          data-events (async/chan (async/sliding-buffer 2) zdata-xform)]
+      (async/pipe data-events events)
       (async/go-loop [cze (reduce (fn [cze z] (assoc cze z (.open z))) {} @children)] ; start event listener loop
         (if-let [{:keys [event-type keeper-state] :as event} (async/<! znode-events)]
           (do
@@ -107,19 +110,25 @@
                                          cs (reset! children (set/union
                                                               (set/difference @children zdeletes)
                                                               zadds))]
-                                     (when (not= segments segments') (log/debugf "Children of %s changed %s => %s" (str this) segments segments'))
+                                     (when (not= segments segments')
+                                       (log/debugf "Children of %s changed %s => %s" (str this) segments segments')
+                                       (async/>!! events {::type ::children-changed ::added zadds ::deleted zdeletes}))
                                      (recur (as-> cze %
                                               (reduce (fn [cze z] (assoc cze z (.open z))) % zadds)
                                               (reduce (fn [cze z] (async/close! (cze z)) (dissoc cze z)) % zdeletes))))
               (log/warnf "Unexpected znode event:state [%s:%s] while watching %s" event-type keeper-state (str this))))
           (do (log/debugf "The event channel for %s closed; shutting down" (str this))
-              (doseq [[z c] cze] (async/close! c)))))
+              (doseq [[z c] cze] (async/close! c))
+              (async/>!! events {::type ::closed}))))
+      (async/>!! events {::type ::opened})
       (async/put! znode-events {:event-type :NodeDataChanged})
       (async/put! znode-events {:event-type :NodeChildrenChanged})
       znode-events))
   (compareVersionAndSet [this version value]
     (let [r (zclient/set-data client (path this) (*serialize* value) version {})]
-      (when r (log/debugf "Set value for %s @ %s" (str this) version))
+      (when r
+        (log/debugf "Set value for %s @ %s" (str this) version)
+        (async/put! events {::type ::set! ::value value ::version version}))
       r))
   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
   ;; https://www.safaribooksonline.com/library/view/zookeeper/9781449361297/ch04.html
@@ -134,11 +143,11 @@
   (hasheq [this] (hash (path this)))
 
   impl/ReadPort
-  (take! [this handler] (impl/take! data-events handler))
+  (take! [this handler] (impl/take! events handler))
 
   impl/Channel
-  (closed? [this] (impl/closed? data-events))
-  (close! [this] (impl/close! data-events))
+  (closed? [this] (impl/closed? events))
+  (close! [this] (impl/close! events))
 
   java.lang.Object
   (toString [this] (format "%s: %s" (.getName (class this)) (path this))))
@@ -176,7 +185,7 @@
   "Create a root znode and watch for client status changes to manage watches"
   ([zclient] (create-root zclient ::root))
   ([zclient initial-value]
-   (let [data-events (async/chan (async/sliding-buffer 2) zdata-xform)
-         z (->ZNode zclient nil "" initial-value (atom #{}) data-events)]
+   (let [events (async/chan (async/sliding-buffer 4))
+         z (->ZNode zclient nil "" initial-value (atom #{}) events)]
      (watch-client z zclient)
      z)))

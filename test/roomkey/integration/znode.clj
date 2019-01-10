@@ -13,55 +13,16 @@
 
 (def sandbox "/sandbox")
 
-(defmacro with-awaited-connection
-  [zclient & body]
-  `(let [c# (async/chan 1)
-         z# ~zclient]
-     (async/tap z# c#)
-     (with-open [client# (zclient/open z# (str connect-string sandbox) 500)]
-       (let [event# (first (async/<!! c#))]
-         (assert (= ::zclient/started event#)))
-       (let [event# (first (async/<!! c#))]
-         (assert (= ::zclient/connected event#)))
-       ~@body)))
-
-(defn sync-path
-  "Using given `client`, Wait up to `timeout` milliseconds for znode at `path` to exist"
-  [timeout client path]
-  (loop [t timeout]
-    (assert (pos? t) (format "Timed out after waiting %dms for node to appear at path %s" timeout path))
-    (if (and (zoo/exists client path))
-      true
-      (do (Thread/sleep 200)
-          (recur (- t 200))))))
-
-(defn sync-znode
-  "Wait up to `timeout` milliseconds for `znode` to exist"
-  [timeout z]
-  (let [client @(.client z)
-        path (znode/path z)]
-    (loop [t timeout]
-      (assert (pos? t) (format "Timed out after waiting %dms for %s to appear" timeout z))
-      (if (and (zoo/exists client path))
-        true
-        (do (Thread/sleep 200)
-            (recur (- t 200)))))))
-
 (defn- streams [n timeout c]
   "Captures the first `n` streamed elements of c subject to a timeout of `timeout` ms"
   (let [result (async/alt!!
-                 (async/into [] (async/take n c)) ([v] (or v ::channel-closed))
+                 (async/into [] (async/take n c 5)) ([v] (or v ::channel-closed))
                  (async/timeout timeout) ([v] (or v ::timeout)))]
     result))
 
 (defchecker eventually-streams [n timeout expected]
   ;; The key to chatty checkers is to have the useful intermediate results be the evaluation of arguments to top-level expressions!
   (chatty-checker [actual] (extended-= (streams n timeout actual) expected)))
-
-(let [counter (atom 0)]
-  (defn next-path
-    []
-    (str "/" (swap! counter inc))))
 
 (background (around :facts (with-open [c (zoo/connect connect-string)]
                              (zoo/delete-all c sandbox)
@@ -71,60 +32,78 @@
       (let [$zclient (zclient/create)
             $root (create-root $zclient)
             $child (add-descendant $root "/child" 0)]
-        (with-awaited-connection $zclient
-          $child => (eventually-streams 1 3000 [[0 0]]))))
+        (zclient/with-awaited-open-connection $zclient (str connect-string sandbox) 500
+          $child => (eventually-streams 3 3000 (just [{::znode/type ::znode/actualized! ::znode/value 0}
+                                                      {::znode/type ::znode/opened}
+                                                      {::znode/type ::znode/datum ::znode/value 0 ::znode/version 0}])))))
 
 (fact "Actualized ZNodes can be updated"
       (let [$zclient (zclient/create)
             $root (create-root $zclient)
             $child (add-descendant $root "/child" 0)]
-        (with-awaited-connection $zclient
-          (sync-znode 1000 $child)
+        (zclient/with-awaited-open-connection $zclient (str connect-string sandbox) 500
+          $child => (eventually-streams 3 5000 (just [{::znode/type ::znode/actualized! ::znode/value 0}
+                                                      {::znode/type ::znode/opened}
+                                                      {::znode/type ::znode/datum ::znode/value 0 ::znode/version 0}]))
           (compare-version-and-set! $child 0 1)
-          $child => (eventually-streams 2 3000 (just [[0 0] [1 1]])))))
+          $child => (eventually-streams 2 5000 (just [{::znode/type ::znode/set! ::znode/value 1 ::znode/version 0}
+                                                      {::znode/type ::znode/datum ::znode/value 1 ::znode/version 1}])))))
 
 (fact "Existing ZNodes are acquired and stream their current value"
       (let [$zclient (zclient/create)
             $root (create-root $zclient)
             $child (add-descendant $root "/child" 0)]
-        (with-awaited-connection $zclient
-          (sync-znode 1000 $child)))
+        (zclient/with-awaited-open-connection $zclient (str connect-string sandbox) 500
+          $child => (eventually-streams 3 2000 (just [{::znode/type ::znode/actualized! ::znode/value 0}
+                                                      {::znode/type ::znode/opened}
+                                                      {::znode/type ::znode/datum ::znode/value 0 ::znode/version 0}]))))
 
       (let [$zclient (zclient/create)
             $root (create-root $zclient)]
-        (with-awaited-connection $zclient
-          (sync-path 1000 @(.client $root) "/child")
-          (Thread/sleep 1000)
+        (zclient/with-awaited-open-connection $zclient (str connect-string sandbox) 500
+          $root => (eventually-streams 3 3000 (just [{::znode/type ::znode/opened}
+                                                     {::znode/type ::znode/datum ::znode/value ::znode/root ::znode/version 0}
+                                                     (just {::znode/type ::znode/children-changed
+                                                            ::znode/added (just [(partial instance? roomkey.znode.ZNode)])
+                                                            ::znode/deleted empty?})]))
           (let [$child (get-in $root ["child"])]
             $child => (partial instance? roomkey.znode.ZNode)
-            $child => (eventually-streams 1 1000 (just [[0 0]]))))))
+            $child => (eventually-streams 2 3000 (just [{::znode/type ::znode/opened}
+                                                        {::znode/type ::znode/datum ::znode/value 0 ::znode/version 0}]))))))
 
 (fact "Existing ZNodes stream current value at startup when version greater than zero even when values match"
       (let [$zclient (zclient/create)
             $root (create-root $zclient)
             $child (add-descendant $root "/child" 0)]
-        (with-awaited-connection $zclient
-          (sync-znode 1000 $child)
-          (compare-version-and-set! $child 0 1)))
+        (zclient/with-awaited-open-connection $zclient (str connect-string sandbox) 500
+          $child => (eventually-streams 3 2000 (just [{::znode/type ::znode/actualized! ::znode/value 0}
+                                                      {::znode/type ::znode/opened}
+                                                      {::znode/type ::znode/datum ::znode/value 0 ::znode/version 0}]))
+          (compare-version-and-set! $child 0 1)
+          $child => (eventually-streams 2 2000 (just [{::znode/type ::znode/set! ::znode/value 1 ::znode/version 0}
+                                                      {::znode/type ::znode/datum ::znode/value 1 ::znode/version 1}]))))
 
       (let [$zclient (zclient/create)
             $root (create-root $zclient)
             $child (add-descendant $root "/child" 1)]
-        (with-awaited-connection $zclient
-          $child => (eventually-streams 1 3000 (just [[1 1]])))))
+        (zclient/with-awaited-open-connection $zclient (str connect-string sandbox) 500
+          $child => (eventually-streams 2 2000 (just [{::znode/type ::znode/opened}
+                                                      {::znode/type ::znode/datum ::znode/value 1 ::znode/version 1}])))))
 
 (fact "Existing ZNodes even stream version zero value at startup when different from initial value"
       (let [$zclient (zclient/create)
             $root (create-root $zclient)
             $child (add-descendant $root "/child" 0)]
-        (with-open [$zclient (zclient/open $zclient (str connect-string sandbox) 500)]
-          (sync-znode 1000 $child)))
-
+        (zclient/with-awaited-open-connection $zclient (str connect-string sandbox) 500
+          $child => (eventually-streams 3 2000 (just [{::znode/type ::znode/actualized! ::znode/value 0}
+                                                      {::znode/type ::znode/opened}
+                                                      {::znode/type ::znode/datum ::znode/value 0 ::znode/version 0}]))))
       (let [$zclient (zclient/create)
             $root (create-root $zclient)
             $child (add-descendant $root "/child" 1)]
-        (with-awaited-connection $zclient
-          $child => (eventually-streams 1 3000 (just [[0 0]])))))
+        (zclient/with-awaited-open-connection $zclient (str connect-string sandbox) 500
+          $child => (eventually-streams 2 2000 (just [{::znode/type ::znode/opened}
+                                                      {::znode/type ::znode/datum ::znode/value 0 ::znode/version 0}])))))
 
 (fact "ZNodes stream pushed values"
       (let [$zclient0 (zclient/create)
@@ -133,22 +112,28 @@
             $zclient1 (zclient/create)
             $root1 (create-root $zclient1)
             $child1 (add-descendant $root1 "/child" 0)]
-        (with-awaited-connection $zclient0
-          (with-open [$zclient1 (zclient/open $zclient1 (str connect-string sandbox) 500)]
-            (sync-znode 1000 $child0)
-            (sync-znode 1000 $child1)
+        (zclient/with-awaited-open-connection $zclient0 (str connect-string sandbox) 500
+          $child0 => (eventually-streams 3 2000 (just [{::znode/type ::znode/actualized! ::znode/value 0}
+                                                       {::znode/type ::znode/opened}
+                                                       {::znode/type ::znode/datum ::znode/value 0 ::znode/version 0}]))
+          (zclient/with-awaited-open-connection $zclient1 (str connect-string sandbox) 500
+            $child1 => (eventually-streams 2 2000 (just [{::znode/type ::znode/opened}
+                                                         {::znode/type ::znode/datum ::znode/value 0 ::znode/version 0}]))
             (compare-version-and-set! $child0 0 1)
-            $child1 => (eventually-streams 2 3000 (just [[0 0] [1 1]]))))))
+            $child0 => (eventually-streams 2 2000 (just [{::znode/type ::znode/set! ::znode/value 1 ::znode/version 0}
+                                                         {::znode/type ::znode/datum ::znode/value 1 ::znode/version 1}]))
+            $child1 => (eventually-streams 1 2000 (just [{::znode/type ::znode/datum ::znode/value 1 ::znode/version 1}]))))))
 
 (fact "Root node behaves like leaves"
       (let [$zclient (zclient/create)
             $root (create-root $zclient 10)]
-        (with-awaited-connection $zclient
-          (sync-znode 1000 $root)))
+        (zclient/with-awaited-open-connection $zclient (str connect-string sandbox) 500
+          $root => (eventually-streams 3 2000 (just [{::znode/type ::znode/actualized! ::znode/value 10}
+                                                     {::znode/type ::znode/opened}
+                                                     {::znode/type ::znode/datum ::znode/value 10 ::znode/version 0}]))))
 
       (let [$zclient (zclient/create)
             $root (create-root $zclient nil)]
-        (with-awaited-connection $zclient
-          (sync-path 1000 @(.client $root) "/")
-          (Thread/sleep 2000)
-          $root => (eventually-streams 1 1000 (just [[10 0]])))))
+        (zclient/with-awaited-open-connection $zclient (str connect-string sandbox) 500
+          $root => (eventually-streams 2 2000 (just [{::znode/type ::znode/opened}
+                                                     {::znode/type ::znode/datum ::znode/value 10 ::znode/version 0}])))))
