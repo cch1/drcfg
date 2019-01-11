@@ -1,12 +1,9 @@
 (ns roomkey.zref
   "A Zookeeper-based reference type"
   (:require [roomkey.zclient :as zclient]
+            [roomkey.znode :as znode]
             [clojure.core.async :as async]
             [clojure.tools.logging :as log]))
-
-(defn ^:dynamic *deserialize* [b] {:pre [(instance? (Class/forName "[B") b)]} (read-string (String. b "UTF-8")))
-
-(defn ^:dynamic *serialize* [obj] {:post [(instance? (Class/forName "[B") %)]} (.getBytes (binding [*print-dup* true] (pr-str obj))))
 
 (def ^:dynamic *max-update-attempts* 10)
 
@@ -28,11 +25,10 @@
 ;;;    current value AND current version.
 ;;;  * The swap operation can fail if there is too much contention for a znode.
 ;;;  * Simple watcher functions are wrapped to ignore the version parameter applied to full-fledged watchers.
-(defprotocol UpdateableZNode
-  (zInitialize [this] "Initialize the ZooKeeper node backing this zref")
-  (zConnect [this] "Start online operations")
-  (zDisconnect [this channel] "Stop online operations")
-  (zUpdate [this version value] "Update the znode backing this zref"))
+(defprotocol ZNodeWatching
+  (start [this] "Start online operations")
+  (update! [this version value] "Update the znode backing this zref")
+  (path [this] "Return the path of the backing ZNode"))
 
 (defprotocol VersionedUpdate
   (compareVersionAndSet [this current-version new-value] "Set to new-value only when current-version is latest"))
@@ -44,66 +40,44 @@
   "A protocol for adding versioned watchers using the same associative storage as \"classic\" watchers"
   (vAddWatch [this k f] "Add versioned watcher that will be called with new value and version"))
 
-(deftype ZRef [path client cache validator watches]
-  UpdateableZNode
-  (zInitialize [this]
-    (try (when (zclient/create-all client path {:persistent? true}) ; idempotent side effects
-           (log/debugf "Created node %s" path))
-         (when (.zUpdate this 0 (first @cache)) ; idempotent side effects
-           (log/debugf "Updated node %s with default value" path))
-         (catch clojure.lang.ExceptionInfo e
-           (log/infof e "Lost connection while initializing %s" path)
-           false)))
-  (zConnect [this]
-    (let [znode-events (async/chan 1)
-          f (fn [zdata] (let [m (-> (:stat zdata)
-                                    (update :ctime #(java.time.Instant/ofEpochMilli %))
-                                    (update :mtime #(java.time.Instant/ofEpochMilli %)))
-                              obj ((juxt (comp *deserialize* :data) (comp :version :stat)) zdata)]
-                          (with-meta obj m)))]
-      (async/go-loop [] ; start event listener loop
-        (if-let [{:keys [event-type keeper-state] :as event} (async/<! znode-events)]
+(def data-xform
+  (comp (filter (comp #{:roomkey.znode/datum} :roomkey.znode/type))
+        (map (fn [{::znode/keys [value stat]}] (with-meta [value (:version stat)] stat)))))
+
+(deftype ZRef [znode cache validator watches]
+  ZNodeWatching
+  (path [this] (znode/path znode))
+  (start [this]
+    (let [data (async/pipe znode (async/chan 1 data-xform))]
+      (async/go-loop []    ; start event listener loop
+        (if-let [[value' version' :as n] (async/<! data)]
           (do
-            (log/debugf "Event [%s:%s] received by %s" event-type keeper-state path)
-            (case event-type
-              :None (do (assert (nil? (:path event)) "Keeper State event received with a path!") ; should be handled by default watch on client
-                        (recur))
-              :NodeDeleted (log/warnf "Node %s deleted" path)
-              :DataWatchRemoved (log/infof "Data watch on %s removed" path)
-              (::Boot :NodeDataChanged) (let [[value' version' :as n] (f (zclient/data client path {:watcher (partial async/put! znode-events)}))
-                                              [value version :as o] @cache
-                                              delta (- version' version)]
-                                          (cond
-                                            (neg? delta) (log/warnf "Received negative version delta [%d -> %d] for %s" version version' path)
-                                            (zero? delta) (log/tracef "Received zero version delta [%d -> %d] for %s" version version' path)
-                                            (and (> version 1) (> delta 1)) (log/infof "Received non-sequential version delta [%d -> %d] for %s"
-                                                                                       version version' path))
-                                          (if (valid? @validator value')
-                                            (do (reset! cache n)
-                                                (when (pos? version)
-                                                  (async/thread (doseq [[k w] @watches]
-                                                                  (try (w k this o n)
-                                                                       (catch Exception e (log/errorf e "Error in watcher %s" k)))))))
-                                            (log/warnf "Watcher received invalid value [%s], ignoring update for %s" value' path))
-                                          (recur))
-              (log/warnf "Unexpected event:state [%s:%s] while watching %s" event-type keeper-state path)))
-          (log/debugf "The znode event channel for %s has closed, shutting down" path)))
-      (async/put! znode-events {:event-type ::Boot})
-      znode-events))
-  (zDisconnect [this channel]
-    (async/close! channel)
-    this)
-  (zUpdate [this version value]
+            (log/debugf "Data element @ version %d received by %s" version' (znode/path znode))
+            (let [[value version :as o] @cache
+                  delta (- version' version)]
+              (cond
+                (neg? delta) (log/warnf "Received negative version delta [%d -> %d] for %s" version version' (znode/path znode))
+                (zero? delta) (log/tracef "Received zero version delta [%d -> %d] for %s" version version' (znode/path znode))
+                (> delta 1) (log/infof "Received non-sequential version delta [%d -> %d] for %s" version version' (znode/path znode)))
+              (if (valid? @validator value')
+                (do (reset! cache n)
+                    (async/thread (doseq [[k w] @watches]
+                                    (try (w k this o n)
+                                         (catch Exception e (log/errorf e "Error in watcher %s" k))))))
+                (log/warnf "Watcher received invalid value [%s], ignoring update for %s" value' (znode/path znode))))
+            (recur))
+          (log/debugf "The znode for %s has closed, shutting down" (znode/path znode))))))
+  (update! [this version value]
     (validate! @validator value)
-    (let [r (zclient/set-data client path (*serialize* value) version {})]
-      (when r (log/debugf "Set value for %s to %s" path value version))
+    (let [r (znode/compare-version-and-set! znode version value)]
+      (when r (log/debugf "Set value for %s to %s" (znode/path znode) value version))
       r))
   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
   ;; https://www.safaribooksonline.com/library/view/zookeeper/9781449361297/ch04.html
 
   VersionedUpdate
   (compareVersionAndSet [this current-version newval]
-    (.zUpdate this current-version newval))
+    (update! this current-version newval))
   VersionedDeref
   (vDeref [this] @cache)
 
@@ -142,42 +116,23 @@
           (do
             (when-not (pos? i) (throw (RuntimeException.
                                        (format "Aborting update of %s after %d failures over ~%dms"
-                                               path *max-update-attempts* (* 2 n)))))
+                                               (znode/path znode) *max-update-attempts* (* 2 n)))))
             (Thread/sleep n)
             (recur (* 2 n) (dec i)))))))
   (swap [this f x] (.swap this (fn [v] (f v x))))
   (swap [this f x y] (.swap this (fn [v] (f v x y))))
   (swap [this f x y args] (.swap this (fn [v] (apply f v x y args))))
   java.lang.Object
-  (toString [this] (format "%s: %s [version %d]" (.getName (class this)) path (last (.vDeref this)))))
-
-(defn- process-client-events
-  [zref events]
-  (let [path (.path zref)]
-    (async/go-loop [[booted? znode-events] [false nil]] ; start event listener loop
-      (if-let [[event client] (async/<! events)]
-        (do
-          (recur (case event
-                   ::zclient/started [booted? znode-events]
-                   ::zclient/connected (do
-                                         (when (not booted?) (.zInitialize zref))
-                                         [true (.zConnect zref)])
-                   ::zclient/disconnected [booted? znode-events] ; be patient
-                   ::zclient/expired [booted? znode-events]
-                   ::zclient/closed (do (.zDisconnect zref events)
-                                        [false nil]) ; do we need to remove watches?
-                   (log/warnf "Unexpected event [%s] while processing client events %s" event path))))
-        (log/infof "The znode event channel for %s has closed, shutting down" path)))))
+  (toString [this] (format "%s: %s [version %d]" (.getName (class this)) (znode/path znode) (last (.vDeref this)))))
 
 (defn create
-  [path default zclient & options]
+  [root-znode path default & options]
   (let [{validator :validator} (apply hash-map options)
-        client-events (async/chan 1)
-        z (->ZRef path zclient (atom (with-meta [default -1] {:version -1}))
+        znode (znode/add-descendant root-znode path default)
+        z (->ZRef znode (atom (with-meta [default -1] {:version -1}))
                   (atom nil) (atom {}))]
     (when validator (.setValidator z validator))
-    (async/tap zclient client-events)
-    (process-client-events z client-events)
+    (start z)
     z))
 
 (def ^:deprecated zref create)
@@ -209,3 +164,7 @@
   [z k f]
   {:pre [(instance? roomkey.zref.ZRef z) (fn? f)]}
   (.vAddWatch z k f))
+
+(defmethod clojure.core/print-method ZRef
+  [zref ^java.io.Writer writer]
+  (.write writer (format "#<ZRef\"%s\" Version %d>" (.path zref) (last (.vDeref zref)))))

@@ -1,13 +1,10 @@
-At zDisconnect, use removeWatches on client for path of zref -requies dumping more of zookeeper-clj (and zk 3.5)
-Use more default client startup behavior (read-only flag, async return) -requires dumping more of zookeeper-clj
-
-## Overhaul startup
+## Consolidate metadata into existing ZNode
+ * It's a pain in the ass to have to create both nodes (X and X.metadata).  A tuple of [value, value-metadata, zref-metadata] would solve the problem nicely at the expense of needing a migration.
  * Scrap extra scope (just prefix w/ "drcfg", and make that a configurable default)
- * Let a common multiplexed channel be the sole coordination of all ZRefs and abandon the *registry* collection.
- * Let `>-` not automatically update registry (but preserve that behavior in `def>-`) -or at least offer the
-   possibility of creating the drcfg stuff with a "bring your own state" option.
- * Use async calls to zookeeper lib
- * Use the default watcher for everything and use pub/sub abstraction to deliver events to ZRef clients.
+ * Support async calls to zookeeper lib
+
+## Allow zref metadata to be specified in the standard Clojure `def` fashion
+Existing approach (trailing varargs) is incompatible... so can't be gradually deprecated.
 
 ## Move reporting to separate namespace
  * Use this to get used zrefs: echo wchp | nc 127.0.0.1 2181 | grep drcfg | sort

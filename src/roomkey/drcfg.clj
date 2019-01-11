@@ -1,13 +1,16 @@
 (ns roomkey.drcfg
   "Dynamic Distributed Run-Time configuration"
-  (:require [roomkey.zref :as z]
+  (:require [roomkey.zref :as zref]
+            [roomkey.znode :as znode]
             [roomkey.zclient :as zclient]
+            [clojure.core.async :as async]
             [clojure.string :as string]
             [clojure.tools.logging :as log]))
 
 ;;; USAGE:  see /roomkey/README.md
 
 (def ^:dynamic *client* (zclient/create))
+(def ^:dynamic *root* (znode/create-root *client*))
 
 (def zk-prefix "drcfg")
 
@@ -19,23 +22,39 @@
   ([client hosts] (open client hosts nil))
   ([client hosts scope]
    ;; avoid a race condition by having mux wired up before feeding in client events
-   (zclient/open client (string/join "/" (filter identity [hosts zk-prefix scope])) 16000)))
+   (let [connect-string (string/join "/" (filter identity [hosts zk-prefix scope]))]
+     (log/infof "Opening client [%s] connection to %s" client connect-string)
+     (zclient/open client connect-string 16000))))
 
 (defn db-initialize!
   "Synchronously initialize a fresh zookeeper database with a root node"
-  ([hosts] (db-initialize! hosts nil))
-  ([hosts scope]
-   (let [root (string/join "/" (filter identity ["" zk-prefix scope]))]
-     (log/infof "Creating root drcfg node %s for connect string %s" root hosts)
-     (with-open [zc (zclient/open *client* hosts 5000)]
-       (zclient/create-all zc root {:persistent? true})))))
+  ([connect-string] (db-initialize! connect-string nil))
+  ([connect-string scope] (db-initialize! connect-string scope 5000))
+  ([connect-string scope timeout] (db-initialize! *client* connect-string scope 5000))
+  ([client connect-string scope timeout]
+   (let [zroot (znode/create-root client) ; fresh... no children
+         root-path (string/join "/" (filter identity ["" zk-prefix scope]))
+         drcfg-root (znode/add-descendant zroot root-path ::root)
+         data (async/pipe drcfg-root
+                          (async/chan 1 (comp (filter (comp #{:roomkey.znode/datum :roomkey.znode/actualized!} :roomkey.znode/type))
+                                              (map :roomkey.znode/type)))
+                          false)]
+     (with-open [zclient (zclient/open client connect-string timeout)]
+       (when-let [result (async/<!! (async/go-loop []
+                                      (async/alt! data ([event] (case event
+                                                                  :roomkey.znode/actualized! (do (log/infof "Database initialized") (recur))
+                                                                  :roomkey.znode/datum true))
+                                                  (async/timeout 10000) ([_] (log/warnf "Timed out waiting for database initialization") false))))]
+         (log/infof "Database ready at %s [%s]" connect-string (str drcfg-root))
+         (Thread/sleep 1000) ; let ZNode acquisition settle down solely to avoid innocuous "Lost connection while processing" errors.
+         result)))))
 
 (defn >-
   "Create a config reference with the given name (must be fully specified,
   including leading slash) and default value and record it for future connecting"
   [name default & options]
   {:pre [] :post [(instance? clojure.lang.IRef %)]}
-  (let [z (apply z/create name default *client* options)]
+  (let [z (apply zref/create *root* name default options)]
     (add-watch z :logger (fn [k r o n] (log/tracef "Value of %s update: old: %s; s" name o n)))
     z))
 
