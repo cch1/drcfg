@@ -48,7 +48,8 @@
   (actualize [this] "Recursively create the znode backing this virtual node and its children")
   (open [this] "Recursively watch the ZooKeeper znode and its children, processing updates to data and children.
   Returns a channel that can be closed to stop processing updates")
-  (compareVersionAndSet [this version value] "Update the znode with the given value asserting the current version"))
+  (compareVersionAndSet [this version value] "Update the znode with the given value asserting the current version")
+  (delete [this version] "Delete this znode, asserting the current version"))
 
 (defprotocol VirtualNode
   "A value-bearing node in a tree"
@@ -88,6 +89,11 @@
       (async/>!! events {::type ::actualized! ::value initial-value})
       (log/infof "Actualized %s" (str this)))
     (doseq [child @children] (actualize child)))
+  (delete [this version]
+    (zclient/delete client (path this) version {})
+    (async/>!! events {::type ::deleted!})
+    (log/infof "Deleted %s" (str this))
+    true)
   (open [this]
     (log/debugf "Opening %s" (str this))
     (let [znode-events (async/chan 1)

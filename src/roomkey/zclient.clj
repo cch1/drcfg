@@ -70,7 +70,8 @@
   (create-all [this path options] "Create a ZNode at the given path, adding ancestors as required")
   (data [this path options] "Fetch the data from the ZNode at the path")
   (set-data [this path data version options] "Set the data on the ZNode at the given path, asserting the current version")
-  (children [this path options] "Discover paths for all child znodes at the server (optionally at the given path)"))
+  (children [this path options] "Discover paths for all child znodes at the server (optionally at the given path)")
+  (delete [this path version options] "Delete the znode at the given path, asserting its current version"))
 
 (defmacro with-client
   "An unhygenic macro that captures `client-atom` and `path` & binds `client` to manage connection issues"
@@ -119,6 +120,11 @@
     (async/put! commands ::close)
     this)
   ZooKeeperFacing
+  (delete [this path version {:keys [async? callback context]
+                              :or {async? false
+                                   context path}}]
+    (with-client (.delete client path version))
+    true)
   (create-znode [this path {:keys [data acl persistent? sequential? context callback async?]
                             :or {persistent? false
                                  sequential? false

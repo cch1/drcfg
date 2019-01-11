@@ -137,3 +137,14 @@
         (zclient/with-awaited-open-connection $zclient (str connect-string sandbox) 500
           $root => (eventually-streams 2 2000 (just [{::znode/type ::znode/opened}
                                                      (just #::znode{:type ::znode/datum :value 10 :stat (contains {:version 0})})])))))
+
+(fact "ZNodes can be deleted"
+      (let [$zclient (zclient/create)
+            $root (create-root $zclient)
+            $child (add-descendant $root "/child" 0)]
+        (zclient/with-awaited-open-connection $zclient (str connect-string sandbox) 500
+          $child => (eventually-streams 3 3000 (just [#::znode{:type ::znode/actualized! :value 0}
+                                                      #::znode{:type ::znode/opened}
+                                                      (just #::znode{:type ::znode/datum :value 0 :stat (contains {:version 0})})]))
+          (delete $child 0) => truthy
+          $child => (eventually-streams 1 3000 (just [#::znode{:type ::znode/deleted!}])))))
