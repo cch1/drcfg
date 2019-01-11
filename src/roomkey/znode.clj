@@ -79,6 +79,7 @@
       (let [c (create-child this n v)]
         (swap! children conj c)
         c)))
+  (children [this] @children)
   BackedZNode
   (actualize [this] ; Recursively create the node and its children, each @ version zero, if not already present
     (when (zclient/create-znode client (path this) {:persistent? true :data (*serialize* initial-value)})
