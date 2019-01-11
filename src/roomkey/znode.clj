@@ -106,12 +106,14 @@
             (case event-type
               :None (do (assert (nil? (:path event)) "Keeper State event received with a path!") ; should be handled by default watch on client
                         (recur cze))
+              :NodeCreated (log/warnf "Node %s created" (str this))
               :NodeDeleted (log/warnf "Node %s deleted" (str this))
               :DataWatchRemoved (log/infof "Data watch on %s removed" (str this))
               :NodeDataChanged (do
                                  (async/thread
                                    (async/>!! data-events (log/spy :trace (zclient/data client (path this) {:watcher (partial async/put! znode-events)}))))
                                  (recur cze))
+              :ChildWatchRemoved (log/infof "Child watch on %s removed" (str this))
               :NodeChildrenChanged (let [segments' (into #{}
                                                          (map (fn [p] (last (string/split p #"/"))))
                                                          (zclient/children client (path this) {:watcher (partial async/put! znode-events)}))
