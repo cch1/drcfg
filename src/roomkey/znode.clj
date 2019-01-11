@@ -21,12 +21,14 @@
         value (try ((comp *deserialize* :data) zdata)
                    (catch java.lang.RuntimeException e
                      (log/warnf "Unable to deserialize znode data")
-                     ::unable-to-deserialize))]
+                     ::unable-to-deserialize)
+                   (catch java.lang.AssertionError e
+                     (log/warnf "No data: %s" (:data zdata))
+                     ::no-data))]
     {::type ::datum ::value value ::stat m}))
 
 (def zdata-xform
-  (comp (map process-zdata)
-        (remove (fn [zdata] (= ::unable-to-deserialize (::value zdata))))))
+  (comp (map process-zdata)))
 
 ;;; A proxy for a znode in a zookeeper cluster.
 ;;; * While offline (before the client connects) or online, a local tree can be created:
