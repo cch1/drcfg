@@ -71,7 +71,8 @@
   (data [this path options] "Fetch the data from the ZNode at the path")
   (set-data [this path data version options] "Set the data on the ZNode at the given path, asserting the current version")
   (children [this path options] "Discover paths for all child znodes at the server (optionally at the given path)")
-  (delete [this path version options] "Delete the znode at the given path, asserting its current version"))
+  (delete [this path version options] "Delete the znode at the given path, asserting its current version")
+  (exists [this path options] "Determine if the ZNode at the given path exists"))
 
 (defmacro with-client
   "An unhygenic macro that captures `client-atom` and `path` & binds `client` to manage connection issues"
@@ -160,6 +161,12 @@
                              async? false
                              context path}}]
     (with-client (seq (.getChildren client path (if watcher (make-watcher (comp watcher event-to-map)) watch?)))))
+  (exists [this path {:keys [watcher watch? async? callback context]
+                      :or {watch? false
+                           async? false
+                           context path}}]
+    (when-let [stat (with-client (.exists client path (if watcher (make-watcher (comp watcher event-to-map)) watch?)))]
+      (stat-to-map stat)))
   clojure.lang.IDeref
   (deref [this] (deref client-atom))
   clojure.core.async.Mult

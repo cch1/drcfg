@@ -37,12 +37,39 @@
                  (do (Thread/sleep 200)
                      (recur (- t 200))))))))
 
+(defchecker bytes-of [expected]
+  (checker [actual] (= (seq actual) (seq (.getBytes expected)))))
+
+(defn- streams [n timeout c]
+  "Captures the first `n` streamed elements of c subject to a timeout of `timeout` ms"
+  (let [result (async/alt!!
+                 (async/into [] (async/take n c 5)) ([v] (or v ::channel-closed))
+                 (async/timeout timeout) ([v] (or v ::timeout)))]
+    result))
+
+(defchecker eventually-streams [n timeout expected]
+  ;; The key to chatty checkers is to have the useful intermediate results be the evaluation of arguments to top-level expressions!
+  (chatty-checker [actual] (extended-= (streams n timeout actual) expected)))
+
 (fact "Can create a client, open it and then close it with proper notifications arriving on supplied channel"
       (let [c (async/chan 1)]
         (with-open [$c (open (create) $cstring0 5000)]
           $c => (partial instance? ZClient)
           (async/<!! (async/tap $c c)) => (just [:roomkey.zclient/connected (partial instance? ZooKeeper)])
           $c => (refers-to (partial instance? ZooKeeper)))))
+
+(fact "Client can perform operations on znodes"
+      (let [c (async/chan 1)
+            $client (create)]
+        (async/tap $client c)
+        (with-open [$c (open $client $cstring0 5000)]
+          c  => (eventually-streams 2 3000 (just [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])
+                                                  (just [:roomkey.zclient/connected (partial instance? ZooKeeper)])]))
+          (create-znode $c "/myznode" {:data (.getBytes "Hello World")}) => truthy
+          (exists $c "/myznode" {}) => (contains {:version 0})
+          (data $c "/myznode" {}) => (just {:data (bytes-of "Hello World") :stat (contains {:version 0})})
+          (set-data $c "/myznode" (.getBytes "foo") 0 {}) => truthy
+          (delete $c "/myznode" 1 {}) => truthy)))
 
 (fact "Can open client to unavailable server"
       (with-open [$t0 (TestingServer. false)
