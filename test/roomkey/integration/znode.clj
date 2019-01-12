@@ -63,9 +63,8 @@
         (zclient/with-awaited-open-connection $zclient (str connect-string sandbox) 500
           $root => (eventually-streams 1 3000 (just [#::znode{:type ::znode/opened}]))
           $root => (eventually-streams 2 3000 (just #{(just #::znode{:type ::znode/datum :value ::znode/root :stat (contains {:version 0})})
-                                                      (just #::znode{:type ::znode/children-changed
-                                                                     :added (just [(partial instance? roomkey.znode.ZNode)])
-                                                                     :deleted empty?})}))
+                                                      (just #::znode{:type ::znode/child-added
+                                                                     :node (partial instance? roomkey.znode.ZNode)})}))
           (let [$child (get-in $root ["child"])]
             $child => (partial instance? roomkey.znode.ZNode)
             $child => (eventually-streams 2 3000 (just [#::znode{:type ::znode/opened}

@@ -1,6 +1,5 @@
 (ns roomkey.unit.znode
   (:require [roomkey.znode :refer :all]
-            [roomkey.zclient :as zclient]
             [clojure.core.async :as async]
             [midje.sweet :refer :all]
             [midje.checking.core :refer [extended-=]]))
@@ -12,9 +11,14 @@
 (fact "Can create a root ZNode"
       (create-root $client) => (partial instance? roomkey.znode.ZNode))
 
+(fact "Can create and identify children of a node"
+      (let [$root (create-root $client)]
+        (add-descendant $root "/a0" "a0") => (partial instance? roomkey.znode.ZNode)
+        (add-descendant $root "/a1" "a1") => (partial instance? roomkey.znode.ZNode)
+        (children $root) => (two-of (partial instance? roomkey.znode.ZNode))))
+
 (fact "Can create descendants of the root ZNode"
       (let [$root (create-root $client)]
-        ;; (.zConnect $z) => (partial satisfies? clojure.core.async.impl.protocols/Channel)
         (add-descendant $root "/a0" "a0") => (partial instance? roomkey.znode.ZNode)
         (add-descendant $root "/a1" "a1") => (partial instance? roomkey.znode.ZNode)
         (add-descendant $root "/a1/b1" "b1") => (partial instance? roomkey.znode.ZNode)
