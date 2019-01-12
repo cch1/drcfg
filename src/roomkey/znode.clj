@@ -45,8 +45,8 @@
 
 (defprotocol BackedZNode
   "A Proxy for a ZooKeeper znode"
-  (actualize [this] "Recursively create the znode backing this virtual node and its children")
-  (open [this znode-events] "Recursively watch the ZooKeeper znode and its children, processing updates to data and children.
+  (create [this] "Create the znode backing this virtual node")
+  (watch [this znode-events] "Recursively watch the ZooKeeper znode and its children, processing updates to data and children.
   Returns a channel that can be closed to stop processing updates")
   (compareVersionAndSet [this version value] "Update the znode with the given value asserting the current version")
   (delete [this version] "Delete this znode, asserting the current version"))
@@ -67,7 +67,7 @@
   [[z c]]
   (assert (nil? c) "Child already is being watched!")
   (let [c (async/chan 1)]
-    (open z c)
+    (watch z c)
     [z c]))
 
 (defn- unwatch-child
@@ -88,7 +88,7 @@
   (unwatch-child a))
 
 (defn- process-children-changes
-  "Atomically update the `children` reference from `parent` with the `paths` ensuring adds are opened exactly once and deletes are closed exactly once"
+  "Atomically update the `children` reference from `parent` with the `paths` ensuring adds and deletes are processed exactly once"
   [parent children paths events]
   (let [names' (into #{} (map (fn [p] (last (string/split p #"/")))) paths)]
     (dosync
@@ -122,18 +122,18 @@
         child)))
   (children [this] (map (comp first deref) (vals @children)))
   BackedZNode
-  (actualize [this] ; Synchronously & recursively create the node and its children, each @ version zero, if not already present
+  (create [this] ; Synchronously create the node @ version zero, if not already present
     (when (zclient/create-znode client (path this) {:persistent? true :data (*serialize* initial-value)})
-      (async/>!! events {::type ::actualized! ::value initial-value})
-      (log/infof "Actualized %s" (str this)))
-    (doseq [child (.children this)] (actualize child)))
+      (async/>!! events {::type ::created! ::value initial-value})
+      (log/infof "Created %s" (str this))
+      true))
   (delete [this version]
     (zclient/delete client (path this) version {})
     (async/>!! events {::type ::deleted!})
     (log/infof "Deleted %s" (str this))
     true)
-  (open [this znode-events]
-    (log/debugf "Opening %s" (str this))
+  (watch [this znode-events]
+    (log/debugf "Watching %s" (str this))
     (let [data-events (async/chan (async/sliding-buffer 2) zdata-xform)]
       (async/pipe data-events events)
       (doseq [[n childa] @children] (send-off childa watch-child))
@@ -158,8 +158,8 @@
               (log/warnf "Unexpected znode event:state [%s:%s] while watching %s" event-type keeper-state (str this))))
           (do (log/debugf "The event channel for %s closed; shutting down" (str this))
               (doseq [[n childa] @children] (send-off childa unwatch-child))
-              (async/>!! events {::type ::closed}))))
-      (async/>!! events {::type ::opened})
+              (async/>!! events {::type ::watch-stop}))))
+      (async/>!! events {::type ::watch-start})
       (async/put! znode-events {:event-type :NodeDataChanged})
       (async/put! znode-events {:event-type :NodeChildrenChanged})))
   (compareVersionAndSet [this version value]
@@ -207,14 +207,20 @@
       (recur (update-or-create-child parent segment ::placeholder) segments)
       (update-or-create-child parent segment value))))
 
+(defn actualize-tree
+  "Recursively create `znode` and its children."
+  [znode]
+  (create znode)
+  (doseq [child (children znode)] (actualize-tree child)))
+
 (defn- watch-client [this client]
   (let [client-events (async/tap client (async/chan 1))]
     (async/go-loop [znode-events nil] ; start event listener loop
       (if-let [[event client] (async/<! client-events)]
         (recur (case event
                  ::zclient/connected (let [znode-events (async/chan 1)]
-                                       (actualize this) ; root triggers blocking recursive actualization of tree
-                                       (open this znode-events)
+                                       (actualize-tree this) ; root triggers blocking recursive actualization of tree
+                                       (watch this znode-events)
                                        znode-events)
                  ::zclient/closed (when znode-events (async/close! znode-events)) ; failed connections start but don't connect before closing?
                  znode-events))
