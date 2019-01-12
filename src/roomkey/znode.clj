@@ -79,13 +79,13 @@
   [[z c :as a] events]
   (async/>!! events {::type ::child-added ::node z})
   (log/debugf "Processed add for %s" (str z))
-  (watch-child a))
+  a)
 
 (defn- process-child-del
   [[z c :as a] events]
   (async/>!! events {::type ::child-deleted ::node z})
   (log/debugf "Processed delete for %s" (str z))
-  (unwatch-child a))
+  a)
 
 (defn- process-children-changes
   "Atomically update the `children` reference from `parent` with the `paths` ensuring adds and deletes are processed exactly once"
@@ -96,10 +96,10 @@
            name-adds (set/difference names' names)
            name-dels (set/difference names names')]
        (doseq [n name-adds] (let [z (create-child parent n ::unknown)] ; This is idempotent, modulo garbage collection
-                              (alter children assoc n (send-off (agent [z nil]) process-child-add events))))
+                              (alter children assoc n (send (agent [z nil]) (comp watch-child process-child-add) events))))
        (doseq [n name-dels] (let [a (@children n)]
                               (alter children dissoc n)
-                              (send-off a process-child-del events)))))))
+                              (send-off a (comp unwatch-child process-child-del) events)))))))
 
 (deftype ZNode [client parent name ^:volatile-mutable initial-value children events]
   VirtualNode
@@ -136,7 +136,6 @@
     (log/debugf "Watching %s" (str this))
     (let [data-events (async/chan (async/sliding-buffer 2) zdata-xform)]
       (async/pipe data-events events)
-      (doseq [[n childa] @children] (send-off childa watch-child))
       (async/go-loop [] ; start event listener loop
         (if-let [{:keys [event-type keeper-state] :as event} (async/<! znode-events)]
           (do
@@ -144,8 +143,17 @@
             (case event-type
               :None (do (assert (nil? (:path event)) "Keeper State event received with a path!") ; should be handled by default watch on client
                         (recur))
-              :NodeCreated (log/infof "Node %s created" (str this))
-              :NodeDeleted (log/infof "Node %s deleted" (str this))
+              :NodeCreated (do (log/infof "Node %s created" (str this))
+                               (doseq [[n childa] @children] (let [[z c] (deref childa)]
+                                                               (send childa watch-child)
+                                                               (create z)))
+                               (async/put! znode-events {:event-type :NodeDataChanged})
+                               (async/put! znode-events {:event-type :NodeChildrenChanged})
+                               (zclient/exists client (path this) {:watcher (partial async/put! znode-events)})
+                               (recur))
+              :NodeDeleted (do (log/infof "Node %s deleted" (str this))
+                               (async/close! znode-events) ; shut down properly
+                               (recur))
               :DataWatchRemoved (log/infof "Data watch on %s removed" (str this))
               :NodeDataChanged (do
                                  (async/thread
@@ -160,8 +168,8 @@
               (doseq [[n childa] @children] (send-off childa unwatch-child))
               (async/>!! events {::type ::watch-stop}))))
       (async/>!! events {::type ::watch-start})
-      (async/put! znode-events {:event-type :NodeDataChanged})
-      (async/put! znode-events {:event-type :NodeChildrenChanged})))
+      (when (zclient/exists client (path this) {:watcher (partial async/put! znode-events)})
+        (async/put! znode-events {:event-type :NodeCreated}))))
   (compareVersionAndSet [this version value]
     (let [r (zclient/set-data client (path this) (*serialize* value) version {})]
       (when r
@@ -207,20 +215,14 @@
       (recur (update-or-create-child parent segment ::placeholder) segments)
       (update-or-create-child parent segment value))))
 
-(defn actualize-tree
-  "Recursively create `znode` and its children."
-  [znode]
-  (create znode)
-  (doseq [child (children znode)] (actualize-tree child)))
-
 (defn- watch-client [this client]
   (let [client-events (async/tap client (async/chan 1))]
     (async/go-loop [znode-events nil] ; start event listener loop
       (if-let [[event client] (async/<! client-events)]
         (recur (case event
                  ::zclient/connected (let [znode-events (async/chan 1)]
-                                       (actualize-tree this) ; root triggers blocking recursive actualization of tree
                                        (watch this znode-events)
+                                       (create this) ; root triggers blocking recursive actualization of tree
                                        znode-events)
                  ::zclient/closed (when znode-events (async/close! znode-events)) ; failed connections start but don't connect before closing?
                  znode-events))
