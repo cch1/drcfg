@@ -102,11 +102,11 @@
           (with-open [$client (open $zclient $cstring 500)]
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])])
             (.start $t)
-            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])
+            (async/alts!! [$c (async/timeout 3500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])
             (let [instance (.findConnectionInstance $t @$zclient)]
               (assert (.killServer $t instance) "Couldn't kill ZooKeeper server instance")
               (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/disconnected (partial instance? ZooKeeper)])])
-              (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])))
+              (async/alts!! [$c (async/timeout 3500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])))
           (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/closed (partial instance? ZooKeeper)])]))))
 
 (fact "Client can be stopped and restarted"
