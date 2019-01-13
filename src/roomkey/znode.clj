@@ -171,6 +171,10 @@
   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
   ;; https://www.safaribooksonline.com/library/view/zookeeper/9781449361297/ch04.html
 
+  clojure.lang.Named
+  (getName [this] name)
+  (getNamespace [this] (when parent (path parent)))
+
   clojure.lang.ILookup
   (valAt [this item] (some #(let [z (key %)] (when (= (.name z) item) z)) @children))
   (valAt [this item not-found] (or (.valAt this item) not-found))
