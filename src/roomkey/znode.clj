@@ -63,43 +63,36 @@
 ;; http://spootnik.org/entries/2014/11/06/playing-with-clojure-core-interfaces/index.html
 ;; https://github.com/clojure/data.priority-map/blob/master/src/main/clojure/clojure/data/priority_map.clj
 
-(defn- watch-child
-  [[z c]]
-  (assert (nil? c) "Child already is being watched!")
-  (let [c (async/chan 1)]
-    (watch z c)
-    [z c]))
-
-(defn- unwatch-child
-  [[z c]]
-  (async/close! c)
-  [z nil])
-
 (defn- process-child-add
   [[z c :as a] events]
   (async/>!! events {::type ::child-added ::node z})
   (log/debugf "Processed add for %s" (str z))
+  (watch z c)
   a)
 
 (defn- process-child-del
   [[z c :as a] events]
   (async/>!! events {::type ::child-deleted ::node z})
   (log/debugf "Processed delete for %s" (str z))
+  (async/close! c)
   a)
 
 (defn- process-children-changes
   "Atomically update the `children` reference from `parent` with the `paths` ensuring adds and deletes are processed exactly once"
+  ;; NB The implied node changes have already been persisted (created and deleted) -here we manage the proxy data and associated processing
   [parent children paths events]
-  (let [names' (into #{} (map (fn [p] (last (string/split p #"/")))) paths)]
+  (let [childs' (into #{} (comp (map (fn [p] (last (string/split p #"/"))))
+                                (map (fn [n] (create-child parent n ::unknown)))) paths)]
     (dosync
-     (let [names (into #{} (keys @children))
-           name-adds (set/difference names' names)
-           name-dels (set/difference names names')]
-       (doseq [n name-adds] (let [z (create-child parent n ::unknown)] ; This is idempotent, modulo garbage collection
-                              (alter children assoc n (send (agent [z nil]) (comp watch-child process-child-add) events))))
-       (doseq [n name-dels] (let [a (@children n)]
-                              (alter children dissoc n)
-                              (send-off a (comp unwatch-child process-child-del) events)))))))
+     (let [childs (into #{} (keys @children))
+           child-adds (set/difference childs' childs)
+           child-dels (set/difference childs childs')]
+       (doseq [child child-adds] (let [c (async/chan 1)] ; This is idempotent, modulo garbage collection
+                                   (alter children assoc child c)
+                                   (send (agent [child c]) process-child-add events)))
+       (doseq [child child-dels] (let [c (@children child)]
+                                   (alter children dissoc child)
+                                   (send (agent [child c]) process-child-del events)))))))
 
 (deftype ZNode [client parent name ^:volatile-mutable initial-value children events]
   VirtualNode
@@ -111,30 +104,30 @@
     ;; This should be safe, but it is a (Clojure) code smell.  It could possibly be avoided through rewriting of the ZNode tree.
     (set! initial-value v)
     this)
-  (create-child [this n v]
+  (create-child [this n v] ; NB: This operation sets the parent of the child, but does not update the children of the parent
     (let [events (async/chan (async/sliding-buffer 4))]
       (ZNode. client this n v (ref {}) events)))
   (update-or-create-child [this n v]
     (if-let [existing (get this n)]
       (if (= v ::placeholder) existing (overlay existing v))
       (let [child (create-child this n v)]
-        (dosync (alter children assoc n (agent [child nil])))
+        (dosync (alter children assoc child (async/chan 1)))
         child)))
-  (children [this] (map (comp first deref) (vals @children)))
+  (children [this] (keys @children))
   BackedZNode
   (create [this] ; Synchronously create the node @ version zero, if not already present
     (when (zclient/create-znode client (path this) {:persistent? true :data (*serialize* initial-value)})
       (async/>!! events {::type ::created! ::value initial-value})
-      (log/infof "Created %s" (str this))
+      (log/debugf "Created %s" (str this))
       true))
   (delete [this version]
     (zclient/delete client (path this) version {})
     (async/>!! events {::type ::deleted!})
-    (log/infof "Deleted %s" (str this))
+    (log/debugf "Deleted %s" (str this))
     true)
   (watch [this znode-events]
     (log/debugf "Watching %s" (str this))
-    (let [data-events (async/chan (async/sliding-buffer 2) zdata-xform)]
+    (let [data-events (async/chan (async/sliding-buffer 4) zdata-xform)]
       (async/pipe data-events events)
       (async/go-loop [] ; start event listener loop
         (if-let [{:keys [event-type keeper-state] :as event} (async/<! znode-events)]
@@ -143,34 +136,30 @@
             (case event-type
               :None (do (assert (nil? (:path event)) "Keeper State event received with a path!") ; should be handled by default watch on client
                         (recur))
-              :NodeCreated (do (log/infof "Node %s created" (str this))
-                               (doseq [[n childa] @children] (let [[z c] (deref childa)]
-                                                               (send childa watch-child)
-                                                               (create z)))
+              :NodeCreated (do (log/debugf "Node %s created" (str this))
+                               (doseq [[z c] @children] (watch z c) (create z)) ; watch must be in place before create
                                (async/put! znode-events {:event-type :NodeDataChanged})
                                (async/put! znode-events {:event-type :NodeChildrenChanged})
-                               (zclient/exists client (path this) {:watcher (partial async/put! znode-events)})
                                (recur))
-              :NodeDeleted (do (log/infof "Node %s deleted" (str this))
+              :NodeDeleted (do (log/debugf "Node %s deleted" (str this))
                                (async/close! znode-events) ; shut down properly
                                (recur))
-              :DataWatchRemoved (log/infof "Data watch on %s removed" (str this))
+              :DataWatchRemoved (log/debugf "Data watch on %s removed" (str this))
               :NodeDataChanged (do
                                  (async/thread
                                    (async/>!! data-events (log/spy :trace (zclient/data client (path this) {:watcher (partial async/put! znode-events)}))))
                                  (recur))
-              :ChildWatchRemoved (log/infof "Child watch on %s removed" (str this))
+              :ChildWatchRemoved (log/debugf "Child watch on %s removed" (str this))
               :NodeChildrenChanged (let [paths (zclient/children client (path this) {:watcher (partial async/put! znode-events)})]
                                      (process-children-changes this children paths events)
                                      (recur))
               (log/warnf "Unexpected znode event:state [%s:%s] while watching %s" event-type keeper-state (str this))))
           (do (log/debugf "The event channel for %s closed; shutting down" (str this))
-              (doseq [[n childa] @children] (send-off childa unwatch-child))
+              (dosync (doseq [[child c] @children] (alter children update child (fn [c] (async/close! c) (async/chan 1))))) ; idempotent
               (async/>!! events {::type ::watch-stop}))))
       (async/put! events {::type ::watch-start}
-                  (fn [_]
-                    (when (zclient/exists client (path this) {:watcher (partial async/put! znode-events)})
-                      (async/put! znode-events {:event-type :NodeCreated}))))))
+                  (fn [_] (when (zclient/exists client (path this) {:watcher (partial async/put! znode-events)})
+                            (async/put! znode-events {:event-type :NodeCreated}))))))
   (compareVersionAndSet [this version value]
     (let [r (zclient/set-data client (path this) (*serialize* value) version {})]
       (when r
@@ -181,7 +170,7 @@
   ;; https://www.safaribooksonline.com/library/view/zookeeper/9781449361297/ch04.html
 
   clojure.lang.ILookup
-  (valAt [this item] (some-> (@children item) deref first))
+  (valAt [this item] (some #(let [z (key %)] (when (= (.name z) item) z)) @children))
   (valAt [this item not-found] (or (.valAt this item) not-found))
 
   ;; https://stackoverflow.com/questions/26622511/clojure-value-equality-and-sets
