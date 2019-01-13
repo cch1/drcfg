@@ -188,7 +188,9 @@
          t# ~timeout
          c# (async/chan 10)]
      (async/tap z# c#)
-     (with-open [client# (open z# cs# t#)]
-       (let [event# (first (async/<!! c#))] (assert (= ::started event#)))
-       (let [event# (first (async/<!! c#))] (assert (= ::connected event#)))
-       ~@body)))
+     (let [r# (with-open [client# (open z# cs# t#)]
+                (let [event# (first (async/<!! c#))] (assert (= ::started event#)))
+                (let [event# (first (async/<!! c#))] (assert (= ::connected event#)))
+                ~@body)]
+       (let [event# (first (async/<!! c#))] (assert (= ::closed event#) (str event#)))
+       r#)))
