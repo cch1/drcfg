@@ -167,9 +167,10 @@
           (do (log/debugf "The event channel for %s closed; shutting down" (str this))
               (doseq [[n childa] @children] (send-off childa unwatch-child))
               (async/>!! events {::type ::watch-stop}))))
-      (async/>!! events {::type ::watch-start})
-      (when (zclient/exists client (path this) {:watcher (partial async/put! znode-events)})
-        (async/put! znode-events {:event-type :NodeCreated}))))
+      (async/put! events {::type ::watch-start}
+                  (fn [_]
+                    (when (zclient/exists client (path this) {:watcher (partial async/put! znode-events)})
+                      (async/put! znode-events {:event-type :NodeCreated}))))))
   (compareVersionAndSet [this version value]
     (let [r (zclient/set-data client (path this) (*serialize* value) version {})]
       (when r
