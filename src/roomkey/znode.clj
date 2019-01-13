@@ -215,18 +215,18 @@
       (recur (update-or-create-child parent segment ::placeholder) segments)
       (update-or-create-child parent segment value))))
 
-(defn- watch-client [this client]
+(defn- watch-client [root client]
   (let [client-events (async/tap client (async/chan 1))]
     (async/go-loop [znode-events nil] ; start event listener loop
       (if-let [[event client] (async/<! client-events)]
         (recur (case event
                  ::zclient/connected (let [znode-events (async/chan 1)]
-                                       (watch this znode-events)
-                                       (create this) ; root triggers blocking recursive actualization of tree
+                                       (watch root znode-events)
+                                       (create root) ; root triggers blocking recursive actualization of tree
                                        znode-events)
                  ::zclient/closed (when znode-events (async/close! znode-events)) ; failed connections start but don't connect before closing?
                  znode-events))
-        (log/infof "The client event channel for %s has closed, shutting down" (path this))))))
+        (log/infof "The client event channel for %s has closed, shutting down" (path root))))))
 
 (defn create-root
   "Create a root znode and watch for client status changes to manage watches"
