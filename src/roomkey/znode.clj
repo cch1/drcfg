@@ -187,7 +187,7 @@
   ;; https://stackoverflow.com/questions/26622511/clojure-value-equality-and-sets
   ;; https://japan-clojurians.github.io/clojure-site-ja/reference/data_structures#Collections
   clojure.lang.IHashEq
-  (hasheq [this] (hash (path this)))
+  (hasheq [this] (hash [(path this) client]))
 
   impl/ReadPort
   (take! [this handler] (impl/take! events handler))
@@ -197,6 +197,8 @@
   (close! [this] (impl/close! events))
 
   java.lang.Object
+  (equals [this other] (and (= (path this) (path other)) (= (.client this) (.client other))))
+  (hashCode [this] (.hashCode [(path this) client]))
   (toString [this] (format "%s: %s" (.getName (class this)) (path this))))
 
 (defn compare-version-and-set!
