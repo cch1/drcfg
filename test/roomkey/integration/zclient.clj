@@ -67,6 +67,7 @@
                                                   (just [:roomkey.zclient/connected (partial instance? ZooKeeper)])]))
           (create-znode $c "/myznode" {:data (.getBytes "Hello World")}) => truthy
           (exists $c "/myznode" {}) => (contains {:version 0})
+          (exists $c "/notmyznode" {}) => falsey
           (data $c "/myznode" {}) => (just {:data (bytes-of "Hello World") :stat (contains {:version 0})})
           (set-data $c "/myznode" (.getBytes "foo") 0 {}) => truthy
           (delete $c "/myznode" 1 {}) => truthy)))

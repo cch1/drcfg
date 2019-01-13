@@ -108,6 +108,7 @@
             $z => (eventually-vrefers-to 1000 ["A" 0])
             (add-watch $z :sync (fn [& args] (deliver sync args)))
             (zoo/set-data c "/myzref" (znode/*serialize* "B") 0)
+            $z => (eventually-vrefers-to 1000 ["B" 1])
             (deref sync 10000 :promise-never-delivered) => (just [:sync (partial instance? roomkey.zref.ZRef) "A" "B"])))))
 
 (fact "A connected ZRef is not updated by invalid values at the cluster"

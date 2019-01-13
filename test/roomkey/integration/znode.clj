@@ -148,3 +148,44 @@
           (delete $child 0) => truthy
           $child => (eventually-streams 2 3000 (just [#::znode{:type ::znode/deleted!}
                                                       #::znode{:type ::znode/watch-stop}])))))
+
+(fact "Existing ZNodes can be deleted"
+      (let [$zclient (zclient/create)
+            $root (create-root $zclient)
+            $child (add-descendant $root "/child" 0)]
+        (zclient/with-awaited-open-connection $zclient (str connect-string sandbox) 500
+          $child => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start}
+                                                      #::znode{:type ::znode/created! :value 0}
+                                                      (just #::znode{:type ::znode/datum :value 0 :stat (contains {:version 0})})])))
+        $child => (eventually-streams 1 1000 [#::znode{:type ::znode/watch-stop}])
+        (zclient/with-awaited-open-connection $zclient (str connect-string sandbox) 500
+          $child => (eventually-streams 2 3000 (just [#::znode{:type ::znode/watch-start}
+                                                      (just #::znode{:type ::znode/datum :value 0 :stat (contains {:version 0})})]))
+          (delete $child 0) => truthy
+          $child => (eventually-streams 2 3000 (just [#::znode{:type ::znode/deleted!}
+                                                      #::znode{:type ::znode/watch-stop}])))))
+
+(fact "Children do not intefere with their parents"
+      (let [$c (zclient/create)
+            $root (create-root $c)
+            $zB (add-descendant $root "/myzref/child" "B")
+            $zA (add-descendant $root "/myzref" "A")]
+        (zclient/with-awaited-open-connection $c (str connect-string sandbox) 500
+          $zA => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start}
+                                                   #::znode{:type ::znode/created! :value "A"}
+                                                   (just #::znode{:type ::znode/datum :value "A" :stat (contains {:version 0})})]))
+          $zB => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start}
+                                                   #::znode{:type ::znode/created! :value "B"}
+                                                   (just #::znode{:type ::znode/datum :value "B" :stat (contains {:version 0})})])))))
+
+(fact "A connected ZRef's watches are called when updated by changes at the cluster"
+      (let [$c (zclient/create)
+            $root (create-root $c)
+            $z (add-descendant $root "/myzref" "A")]
+        (with-open [c (zoo/connect (str connect-string sandbox))]
+          (zclient/with-awaited-open-connection $c (str connect-string sandbox) 500
+            $z => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start}
+                                                    #::znode{:type ::znode/created! :value "A"}
+                                                    (just #::znode{:type ::znode/datum :value "A" :stat (contains {:version 0})})]))
+            (zoo/set-data c "/myzref" (znode/*serialize* "B") 0)
+            $z => (eventually-streams 1 3000 (just [(just #::znode{:type ::znode/datum :value "B" :stat (contains {:version 1})})]))))))
