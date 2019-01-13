@@ -18,6 +18,7 @@
   `(str "/" (str *ns*) "/" ~n))
 
 (defn open
+  "Open a connection with `client` in `scope` to the ZooKeeper cluster defined by `hosts`"
   ([hosts] (open *client* hosts))
   ([client hosts] (open client hosts nil))
   ([client hosts scope]
@@ -27,7 +28,7 @@
      (zclient/open client connect-string 16000))))
 
 (defn db-initialize!
-  "Synchronously initialize a fresh zookeeper database with a root node"
+  "Synchronously initialize a fresh drcfg database in `scope` at the ZooKeeper cluster identified by `connect-string`"
   ([connect-string] (db-initialize! connect-string nil))
   ([connect-string scope] (db-initialize! connect-string scope 5000))
   ([connect-string scope timeout]
@@ -58,6 +59,8 @@
     (add-watch z :logger (fn [k r o n] (log/tracef "Value of %s update: old: %s; s" name o n)))
     z))
 
+;; TODO: Switch to Clojure conventions for standard metadata
+;; Reference: https://stackoverflow.com/questions/25478158/how-do-i-use-clojure-tools-macro-name-with-attributes
 (defmacro def>-
   "Def a config reference with the given name.  The current namespace will be
   automatically prepended to create the zookeeper path -when refactoring, note

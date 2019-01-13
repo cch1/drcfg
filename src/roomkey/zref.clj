@@ -85,7 +85,6 @@
   (vAddWatch [this k f] (swap! watches assoc k f) this)
 
   clojure.lang.IMeta
-  ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_timeInZk
   (meta [this] (meta @cache))
 
   clojure.lang.IDeref

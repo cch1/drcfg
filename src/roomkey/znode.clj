@@ -7,15 +7,16 @@
             [clojure.core.async.impl.protocols :as impl]
             [clojure.tools.logging :as log]))
 
+;; TODO: Support (de)serialization to a vector of [value metadata]
 (defn ^:dynamic *deserialize* [b] {:pre [(instance? (Class/forName "[B") b)]} (read-string (String. b "UTF-8")))
 
 (defn ^:dynamic *serialize* [obj] {:post [(instance? (Class/forName "[B") %)]} (.getBytes (binding [*print-dup* true] (pr-str obj))))
 
-;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_timeInZk
 (defn- process-zdata
   "Process raw zdata into usefully deserialized types and structure"
   [zdata]
   (let [m (-> (:stat zdata)
+              ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_timeInZk
               (update :ctime #(java.time.Instant/ofEpochMilli %))
               (update :mtime #(java.time.Instant/ofEpochMilli %)))
         value (try ((comp *deserialize* :data) zdata)
@@ -36,18 +37,17 @@
 ;;;   * A root node must already exist before descendants can be created.
 ;;;   * Descendants of the root can be created in any order.  Placeholders will be created for undefined intervening nodes.
 ;;; * While online (after the client connects):
-;;;   * A local (sub-) tree can be actualized, or persisted, to the cluster with only missing nodes (with default value) created.
+;;;   * A local (sub-) tree can be persisted to the cluster with only missing nodes (with default value) created.
 ;;;   * Ad hoc updates pushed from the server are streamed through the ZNode which proxies a clojure.core.async channel.
-;;;     NB: if the initial/default value matches a pushed version 0 update from the server, it is not considered an "update" and is not streamed.
+;;;     NB: Even if the initial/default value matches a pushed version 0 update from the server, it is considered an "update" and streamed.
 ;;;   * The znode can subsequently be updated synchronously, but with the resulting update processed asynchronously only upon arrival.
-;;;   * The compare-and-set semantics are tightened to insist that updates can only apply to the
-;;;     current value AND current version.
+;;;   * The compare-and-set semantics are tightened to insist that updates can only apply to the current value AND current version.
 
 (defprotocol BackedZNode
   "A Proxy for a ZooKeeper znode"
   (create [this] "Create the znode backing this virtual node")
-  (watch [this znode-events] "Recursively watch the ZooKeeper znode and its children, processing updates to data and children.
-  Returns a channel that can be closed to stop processing updates")
+  (watch [this znode-events] "Recursively watch the ZooKeeper znode and its children, processing updates to data and children into the given channel.
+  The channel can be closed to stop processing updates")
   (compareVersionAndSet [this version value] "Update the znode with the given value asserting the current version")
   (delete [this version] "Delete this znode, asserting the current version"))
 
@@ -58,10 +58,6 @@
   (update-or-create-child [this name value] "Update the existing child node or create a new child of this node with the given name and default value")
   (overlay [this v] "Overlay the existing placeholder node's value with a concrete value")
   (children [this] "Return the immediate children of this node"))
-
-;; http://insideclojure.org/2016/03/16/collections/
-;; http://spootnik.org/entries/2014/11/06/playing-with-clojure-core-interfaces/index.html
-;; https://github.com/clojure/data.priority-map/blob/master/src/main/clojure/clojure/data/priority_map.clj
 
 (defn- process-child-add
   [[z c :as a] events]
@@ -93,6 +89,10 @@
        (doseq [child child-dels] (let [c (@children child)]
                                    (alter children dissoc child)
                                    (send (agent [child c]) process-child-del events)))))))
+
+;; http://insideclojure.org/2016/03/16/collections/
+;; http://spootnik.org/entries/2014/11/06/playing-with-clojure-core-interfaces/index.html
+;; https://github.com/clojure/data.priority-map/blob/master/src/main/clojure/clojure/data/priority_map.clj
 
 (deftype ZNode [client parent name ^:volatile-mutable initial-value children events]
   VirtualNode
@@ -129,7 +129,9 @@
           delete-events (async/chan 1 (dedupe))] ; why won't a promise channel work here?
       (async/pipe data-events events)
       (async/pipe delete-events events)
-      (async/go-loop [] ; start event listener loop
+      ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
+      ;; https://www.safaribooksonline.com/library/view/zookeeper/9781449361297/ch04.html
+      (async/go-loop []
         (if-let [{:keys [event-type keeper-state] :as event} (async/<! znode-events)]
           (do
             (log/debugf "Event [%s:%s] for %s" event-type keeper-state (str this))
@@ -142,7 +144,7 @@
                                (async/put! znode-events {:event-type :NodeDataChanged})
                                (async/put! znode-events {:event-type :NodeChildrenChanged})
                                (recur))
-              :NodeDeleted (do (log/debugf "Node %s deleted" (str this)) ; This event is generated by multiple watchers...
+              :NodeDeleted (do (log/debugf "Node %s deleted" (str this)) ; This event is generated by both data and child watches.
                                (async/>!! delete-events {::type ::deleted!})
                                (async/close! znode-events) ; shut down properly
                                (recur))
@@ -168,8 +170,6 @@
         (log/debugf "Set value for %s @ %s" (str this) version)
         (async/put! events {::type ::set! ::value value ::version version}))
       r))
-  ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
-  ;; https://www.safaribooksonline.com/library/view/zookeeper/9781449361297/ch04.html
 
   clojure.lang.Named
   (getName [this] name)
