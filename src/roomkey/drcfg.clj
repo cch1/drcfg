@@ -30,9 +30,9 @@
   "Synchronously initialize a fresh zookeeper database with a root node"
   ([connect-string] (db-initialize! connect-string nil))
   ([connect-string scope] (db-initialize! connect-string scope 5000))
-  ([connect-string scope timeout] (db-initialize! *client* connect-string scope 5000))
-  ([client connect-string scope timeout]
-   (let [zroot (znode/create-root client) ; fresh... no children
+  ([connect-string scope timeout]
+   (let [client (zclient/create) ; fresh... nobody should be watching
+         zroot (znode/create-root client) ; fresh... no children
          root-path (string/join "/" (filter identity ["" zk-prefix scope]))
          drcfg-root (znode/add-descendant zroot root-path ::root)
          data (async/pipe drcfg-root

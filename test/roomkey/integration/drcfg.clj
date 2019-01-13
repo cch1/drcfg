@@ -84,7 +84,7 @@
 
 (fact "can initialize a fresh database"
       (with-open [server (TestingServer.)]
-        (db-initialize! (zclient/create) (.getConnectString server) sandbox 5000) => truthy)
+        (db-initialize! (.getConnectString server) sandbox 5000) => truthy)
       (with-open [server (TestingServer.)]
         (db-initialize! (.getConnectString server)) => truthy))
 
@@ -96,7 +96,7 @@
                                           roomkey.drcfg/*client* client
                                           *connect-string* (.getConnectString server)
                                           roomkey.drcfg/*root* (znode/create-root client)]
-                                  (db-initialize! (zclient/create) *connect-string* sandbox 5000)
+                                  (db-initialize! *connect-string* sandbox 5000)
                                   ?form))))])
 
 (fact "Can open and close connections regardless of viability"
