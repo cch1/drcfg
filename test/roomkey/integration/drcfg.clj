@@ -46,12 +46,12 @@
             (recur (- t 200)))))))
 
 (defmacro with-awaited-connection
-  [zclient connect-string sandbox & body]
+  [zroot connect-string sandbox & body]
   `(let [c# (async/chan 1)
-         z# ~zclient]
-     (async/tap z# c#)
+         z# ~zroot]
+     (async/tap (.client z#) c#)
      ;; TODO: drain client channel before opening.
-     (with-open [client# (open z# ~connect-string ~sandbox)]
+     (with-open [client# (open ~connect-string z# ~sandbox)]
        (let [event# (first (async/<!! c#))]
          (assert (= ::zclient/started event#)))
        (let [event# (first (async/<!! c#))]
@@ -79,6 +79,15 @@
                  (do (Thread/sleep 200)
                      (recur (- t 200))))))))
 
+(background [(around :contents (do ?form))
+             (around :facts (with-open [server (TestingServer.)
+                                        zc (zoo/connect (.getConnectString server))]
+                              (binding [*zc* zc
+                                        *connect-string* (.getConnectString server)
+                                        roomkey.drcfg/*root* (znode/create-root)]
+                                (db-initialize! *connect-string* sandbox 5000)
+                                ?form)))])
+
 (fact "can create a config value"
       (>- (next-path) "my-default-value" :validator string?) => (refers-to "my-default-value"))
 
@@ -88,28 +97,17 @@
       (with-open [server (TestingServer.)]
         (db-initialize! (.getConnectString server)) => truthy))
 
-(background [(around :contents (do ?form))
-             (around :facts (with-open [server (TestingServer.)
-                                        zc (zoo/connect (.getConnectString server))]
-                              (let [client (zclient/create)]
-                                (binding [*zc* zc
-                                          roomkey.drcfg/*client* client
-                                          *connect-string* (.getConnectString server)
-                                          roomkey.drcfg/*root* (znode/create-root client)]
-                                  (db-initialize! *connect-string* sandbox 5000)
-                                  ?form))))])
-
 (fact "Can open and close connections regardless of viability"
-      (with-open [c (open roomkey.drcfg/*client* bogus-host)]
+      (with-open [c (open bogus-host roomkey.drcfg/*root*)]
         c => (partial instance? roomkey.zclient.ZClient))
-      (with-open [c (open roomkey.drcfg/*client* *connect-string*)]
+      (with-open [c (open *connect-string* roomkey.drcfg/*root*)]
         c => (partial instance? roomkey.zclient.ZClient)))
 
 (fact "Slaved config value gets updated post-connect"
       (let [p "/n/p0001" ; (next-path)
             abs-path (abs-path p)
             la (>- p "V0" :validator string?)]
-        (with-awaited-connection *client* *connect-string* sandbox
+        (with-awaited-connection *root* *connect-string* sandbox
           (sync-path 5000 abs-path "V0")
           (set-path! abs-path "V1")
           la => (eventually-refers-to 10000 "V1"))))
@@ -118,7 +116,7 @@
       (let [p "/N/0" ; (next-path)
             abs-path (abs-path p)
             la (>- p "V0" :validator string?)]
-        (with-awaited-connection *client* *connect-string* sandbox
+        (with-awaited-connection *root* *connect-string* sandbox
           (sync-path 5000 abs-path "V0")
           (set-path! abs-path "V1")
           la => (eventually-refers-to 10000 "V1"))))
@@ -130,7 +128,7 @@
             abs-path1 (abs-path n1)
             la0 (>- n0 0 :validator integer?)
             la1 (>- n1 1 :validator integer?)]
-        (with-awaited-connection *client* *connect-string* sandbox
+        (with-awaited-connection *root* *connect-string* sandbox
           (sync-path 5000 abs-path0 0)
           (sync-path 5000 abs-path1 1)
           (set-path! abs-path0 1)
@@ -140,7 +138,7 @@
       (let [n (next-path)
             abs-path (abs-path n)
             la (>- n 0 :validator integer?)]
-        (with-awaited-connection *client* *connect-string* sandbox
+        (with-awaited-connection *root* *connect-string* sandbox
           (sync-path 5000 abs-path 0)
           (set-path! abs-path 1)
           la => (eventually-refers-to 10000 1))))
@@ -149,7 +147,7 @@
       (let [n (next-path)
             abs-path (abs-path n)
             la (>- n 0 :validator integer?)]
-        (with-awaited-connection *client* *connect-string* sandbox
+        (with-awaited-connection *root* *connect-string* sandbox
           (sync-path 5000 abs-path 0)
           (set-path! abs-path "x")
           (sync-path 5000 abs-path "x")
@@ -159,7 +157,7 @@
       (let [n (next-path)
             abs-path (abs-path n)
             la (>- n 0)]
-        (with-awaited-connection *client* *connect-string* sandbox
+        (with-awaited-connection *root* *connect-string* sandbox
           (sync-path 5000 abs-path 0)
           (set-path! abs-path "x")
           la => (eventually-refers-to 10000 "x")
@@ -178,5 +176,5 @@
          (create-path! abs-path "value")
          (create-path! (str abs-path "/.metadata") {:doc "My Doc"})
          (let [la (>- n "default-value" :meta {:doc "My Default Doc"})]
-           (with-awaited-connection *client* *connect-string* sandbox
+           (with-awaited-connection *root* *connect-string* sandbox
              la => (eventually-refers-to 10000 "value")))))

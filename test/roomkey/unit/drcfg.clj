@@ -16,6 +16,6 @@
         (zref/create *root* "/ns/x" 1) => (atom 1)))
 
 (fact "open starts zrefs with client specs"
-      (open ..client.. "cspecs") => ..client..
+      (open "cspecs") => ..client..
       (provided
-       (zclient/open ..client.. (as-checker string?) anything) => ..client..))
+       (zclient/open (as-checker (partial instance? roomkey.zclient.ZClient)) "cspecs/drcfg" (as-checker integer?)) => ..client..))

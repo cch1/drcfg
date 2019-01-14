@@ -37,10 +37,12 @@
                      (recur (- t 200))))))))
 
 (defmacro with-awaited-connection
-  [zclient & body]
-  `(let [c# (async/chan 1)]
-     (async/tap ~zclient c#)
-     (with-open [client# (zclient/open ~zclient (str connect-string sandbox) 500)]
+  [root & body]
+  `(let [c# (async/chan 1)
+         root# ~root
+         client# (.client root#)]
+     (async/tap client# c#)
+     (with-open [client# (znode/open root# (str connect-string sandbox) 500)]
        (let [event# (first (async/<!! c#))]
          (assert (= ::zclient/started event#)))
        (let [event# (first (async/<!! c#))]
@@ -57,19 +59,17 @@
     (str "/" (swap! counter inc))))
 
 (fact "A ZRef reflects the persisted version of the initial default value upon actualization"
-      (let [$c (zclient/create)
-            $root (znode/create-root $c)
+      (let [$root (znode/create-root)
             $z (create $root "/myzref" "A")]
-        (with-awaited-connection $c
+        (with-awaited-connection $root
           $z => (eventually-vrefers-to 2000 ["A" 0]))))
 
 (fact "Can update a connected ZRef"
-      (let [$c (zclient/create)
-            $root (znode/create-root $c)
+      (let [$root (znode/create-root)
             $z0 (create $root "/zref0" "A")
             $z1 (zref $root "/zref1" "A")
             $z2 (zref $root "/zref2" 1)]
-        (with-awaited-connection $c
+        (with-awaited-connection $root
           $z0 => (eventually-vrefers-to 1000 ["A" 0])
           (.compareVersionAndSet $z0 0 "B") => true
           $z0 => (eventually-vrefers-to 1000 ["B" 1])
@@ -89,22 +89,20 @@
           $z2 => (eventually-vrefers-to 1000 [3 2]))))
 
 (fact "A connected ZRef is updated by changes at the cluster"
-      (let [$c (zclient/create)
-            $root (znode/create-root $c)
+      (let [$root (znode/create-root)
             $z (zref $root "/myzref" "A")]
-        (with-awaited-connection $c
+        (with-awaited-connection $root
           (let [c (zoo/connect (str connect-string sandbox))]
             $z => (eventually-vrefers-to 1000 ["A" 0])
             (zoo/set-data c "/myzref" (znode/*serialize* "B") 0)
             $z => (eventually-vrefers-to 1000 ["B" 1])))))
 
 (fact "A connected ZRef's watches are called when updated by changes at the cluster"
-      (let [$c (zclient/create)
-            $root (znode/create-root $c)
+      (let [$root (znode/create-root)
             $z (zref $root "/myzref" "A")
             sync (promise)]
         (with-open [c (zoo/connect (str connect-string sandbox))]
-          (with-awaited-connection $c
+          (with-awaited-connection $root
             $z => (eventually-vrefers-to 1000 ["A" 0])
             (add-watch $z :sync (fn [& args] (deliver sync args)))
             (zoo/set-data c "/myzref" (znode/*serialize* "B") 0)
@@ -112,12 +110,11 @@
             (deref sync 10000 :promise-never-delivered) => (just [:sync (partial instance? roomkey.zref.ZRef) "A" "B"])))))
 
 (fact "A connected ZRef is not updated by invalid values at the cluster"
-      (let [$c (zclient/create)
-            $root (znode/create-root $c)
+      (let [$root (znode/create-root)
             $z (zref $root "/myzref" "A" :validator string?)
             sync (promise)]
         (with-open [c (zoo/connect (str connect-string sandbox))]
-          (with-awaited-connection $c
+          (with-awaited-connection $root
             $z => (eventually-vrefers-to 1000 ["A" 0])
             (add-watch $z :sync (fn [& args] (deliver sync args)))
             (zoo/set-data c "/myzref" (znode/*serialize* 23) 0)
@@ -126,14 +123,13 @@
             $z => (eventually-vrefers-to 1000 ["B" 2])))))
 
 (fact "Children do not intefere with their parents"
-      (let [$c (zclient/create)
-            $root (znode/create-root $c)
+      (let [$root (znode/create-root)
             $zB (create $root "/myzref/child" "B" :validator string?)
             $zA (create $root "/myzref" "A" :validator string?)
             sync-a (promise)
             sync-b (promise)]
         (with-open [c (zoo/connect (str connect-string sandbox))]
-          (with-awaited-connection $c
+          (with-awaited-connection $root
             $zA => (eventually-vrefers-to 1000 ["A" 0])
             $zB => (eventually-vrefers-to 1000 ["B" 0])
             (add-watch $zA :sync (fn [& args] (deliver sync-a args)))
@@ -146,12 +142,11 @@
             $zB => (eventually-refers-to 1000 "b")))))
 
 (fact "A ZRef deleted at the cluster throws exceptions on update but otherwise behaves"
-      (let [$c (zclient/create)
-            $root (znode/create-root $c)
+      (let [$root (znode/create-root)
             $z (zref $root "/myzref" "A")
             sync (promise)]
         (with-open [c (zoo/connect (str connect-string sandbox))]
-          (with-awaited-connection $c
+          (with-awaited-connection $root
             $z => (eventually-vrefers-to 1000 ["A" 0])
             (zoo/delete c "/myzref")
             (compare-and-set! $z "A" "B") => (throws org.apache.zookeeper.KeeperException$NoNodeException)

@@ -1,7 +1,6 @@
 (ns roomkey.zref
   "A Zookeeper-based reference type"
-  (:require [roomkey.zclient :as zclient]
-            [roomkey.znode :as znode]
+  (:require [roomkey.znode :as znode]
             [clojure.core.async :as async]
             [clojure.tools.logging :as log]))
 
