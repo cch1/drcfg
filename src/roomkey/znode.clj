@@ -107,9 +107,10 @@
     (let [p (str (when parent (.path parent)) "/" name)]
       (if (.startsWith p "//") (.substring p 1) p)))
   (overlay [this v]
-    (assert (= initial-value ::placeholder) "Can't overwrite existing child")
-    ;; This should be safe, but it is a (Clojure) code smell.  It could possibly be avoided through rewriting of the ZNode tree.
-    (set! initial-value v)
+    (when (not= initial-value v)
+      (assert (= initial-value ::placeholder) "Can't overwrite existing child")
+      ;; This should be safe, but it is a (Clojure) code smell.  It could possibly be avoided through rewriting of the ZNode tree.
+      (set! initial-value v))
     this)
   (create-child [this n v] ; NB: This operation sets the parent of the child, but does not update the children of the parent
     (let [events (async/chan (async/sliding-buffer 4))]
