@@ -123,6 +123,23 @@
                                                          (just #::znode{:type ::znode/datum :value 1 :stat (contains {:version 1})})]))
             $child1 => (eventually-streams 1 2000 (just [(just #::znode{:type ::znode/datum :value 1 :stat (contains {:version 1})})]))))))
 
+(fact "Existing ZNodes stream pushed values exactly once"
+      (let [$zclient0 (zclient/create)
+            $root0 (create-root $zclient0)
+            $child0 (add-descendant $root0 "/child" 0)
+            $zclient1 (zclient/create)
+            $root1 (create-root $zclient1)
+            $child1 (add-descendant $root1 "/child" 0)]
+        (zclient/with-awaited-open-connection $zclient0 (str connect-string sandbox) 500
+          $child0 => (eventually-streams 3 2000 (just [{::znode/type ::znode/watch-start}
+                                                       {::znode/type ::znode/created! ::znode/value 0}
+                                                       (just #::znode{:type ::znode/datum :value 0 :stat (contains {:version 0})})])))
+        $child0 => (eventually-streams 1 1000 [#::znode{:type ::znode/watch-stop}])
+        (zclient/with-awaited-open-connection $zclient1 (str connect-string sandbox) 500
+          $child1 => (eventually-streams 2 2000 (just [{::znode/type ::znode/watch-start}
+                                                       (just #::znode{:type ::znode/datum :value 0 :stat (contains {:version 0})})]))
+          $child1 => (eventually-streams 1 2000 ::timeout))))
+
 (fact "Root node behaves like leaves"
       (let [$zclient (zclient/create)
             $root (create-root $zclient 10)]

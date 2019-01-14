@@ -1,7 +1,6 @@
 (ns roomkey.integration.zclient
   (:require [roomkey.zclient :refer :all :as z]
             [clojure.core.async :as async]
-            [zookeeper :as zoo]
             [clojure.tools.logging :as log]
             [midje.sweet :refer :all]
             [midje.checking.core :refer [extended-=]])
@@ -59,17 +58,22 @@
           $c => (refers-to (partial instance? ZooKeeper)))))
 
 (fact "Client can perform operations on znodes"
-      (let [c (async/chan 1)
+      (let [test-server (TestingServer. true)
+            c (async/chan 1)
             $client (create)]
         (async/tap $client c)
-        (with-open [$c (open $client $cstring0 5000)]
+        (with-open [$c (open $client (.getConnectString test-server) 5000)]
           c  => (eventually-streams 2 3000 (just [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])
                                                   (just [:roomkey.zclient/connected (partial instance? ZooKeeper)])]))
-          (create-znode $c "/myznode" {:data (.getBytes "Hello World")}) => truthy
+          (create-znode $c "/myznode" {:data (.getBytes "Hello World") :persistent? true}) => (contains {:stat map?})
+          (create-znode $c "/myznode/child" {}) => truthy
           (exists $c "/myznode" {}) => (contains {:version 0})
           (exists $c "/notmyznode" {}) => falsey
           (data $c "/myznode" {}) => (just {:data (bytes-of "Hello World") :stat (contains {:version 0})})
           (set-data $c "/myznode" (.getBytes "foo") 0 {}) => truthy
+          (Thread/sleep 20)
+          (children $c "/myznode" {}) => (just {:paths (one-of string?) :stat map?})
+          (delete $c "/myznode/child" 0 {}) => truthy
           (delete $c "/myznode" 1 {}) => truthy)))
 
 (fact "Can open client to unavailable server"

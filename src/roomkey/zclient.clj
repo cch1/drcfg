@@ -132,8 +132,10 @@
                                  acl (acls :open-acl-unsafe)
                                  context path
                                  async? false}}]
-    (let [create-mode (create-modes {:persistent? persistent?, :sequential? sequential?})]
-      (try (with-client (.create client path data acl create-mode))
+    (let [stat (Stat.)
+          create-mode (create-modes {:persistent? persistent?, :sequential? sequential?})]
+      (try (with-client (.create client path data acl create-mode stat))
+           {:stat (stat-to-map stat)}
            (catch KeeperException$NodeExistsException e
              false))))
   (create-all [this path options]
@@ -160,7 +162,9 @@
                         :or {watch? false
                              async? false
                              context path}}]
-    (with-client (seq (.getChildren client path (if watcher (make-watcher (comp watcher event-to-map)) watch?)))))
+    (let [stat (Stat.)]
+      {:paths (into () (with-client (.getChildren client path (if watcher (make-watcher (comp watcher event-to-map)) watch?) stat)))
+       :stat (stat-to-map stat)}))
   (exists [this path {:keys [watcher watch? async? callback context]
                       :or {watch? false
                            async? false

@@ -12,24 +12,31 @@
 
 (defn ^:dynamic *serialize* [obj] {:post [(instance? (Class/forName "[B") %)]} (.getBytes (binding [*print-dup* true] (pr-str obj))))
 
-(defn- process-zdata
+(defn- process-stat
+  "Process stat structure into useful data"
+  [zdata]
+  (-> zdata
+      ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_timeInZk
+      (update-in [:stat :ctime] #(java.time.Instant/ofEpochMilli %))
+      (update-in [:stat :mtime] #(java.time.Instant/ofEpochMilli %))))
+
+(defn- deserialize-data
   "Process raw zdata into usefully deserialized types and structure"
   [zdata]
-  (let [m (-> (:stat zdata)
-              ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_timeInZk
-              (update :ctime #(java.time.Instant/ofEpochMilli %))
-              (update :mtime #(java.time.Instant/ofEpochMilli %)))
-        value (try ((comp *deserialize* :data) zdata)
-                   (catch java.lang.RuntimeException e
-                     (log/warnf "Unable to deserialize znode data")
-                     ::unable-to-deserialize)
-                   (catch java.lang.AssertionError e
-                     (log/warnf "No data: %s" (:data zdata))
-                     ::no-data))]
-    {::type ::datum ::value value ::stat m}))
+  (update zdata :data (fn [ba] (try (*deserialize* ba)
+                                    (catch java.lang.RuntimeException e
+                                      (log/warnf "Unable to deserialize znode data")
+                                      ::unable-to-deserialize)
+                                    (catch java.lang.AssertionError e
+                                      (log/warnf "No data: %s" ba)
+                                      ::no-data)))))
+
+(defn- normalize-datum [{:keys [stat data]}] {::type ::datum ::value data ::stat stat})
 
 (def zdata-xform
-  (comp (map process-zdata)))
+  (comp (map process-stat)
+        (map deserialize-data)
+        (map normalize-datum)))
 
 ;;; A proxy for a znode in a zookeeper cluster.
 ;;; * While offline (before the client connects) or online, a local tree can be created:
@@ -154,7 +161,7 @@
                                    (async/>!! data-events (log/spy :trace (zclient/data client (path this) {:watcher (partial async/put! znode-events)}))))
                                  (recur))
               :ChildWatchRemoved (log/debugf "Child watch on %s removed" (str this))
-              :NodeChildrenChanged (let [paths (zclient/children client (path this) {:watcher (partial async/put! znode-events)})]
+              :NodeChildrenChanged (let [{:keys [paths stat]} (zclient/children client (path this) {:watcher (partial async/put! znode-events)})]
                                      (process-children-changes this children paths events)
                                      (recur))
               (log/warnf "Unexpected znode event:state [%s:%s] while watching %s" event-type keeper-state (str this))))
