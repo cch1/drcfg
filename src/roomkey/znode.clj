@@ -216,10 +216,13 @@
   "Add a descendant ZNode to the given (sub)tree's `root` ZNode at the given (relative) `path` carrying the given `value`
   creating placeholder intermediate nodes as required."
   [root path value]
-  (loop [parent root [segment & segments] (rest (string/split path #"/"))]
-    (if (seq segments)
-      (recur (update-or-create-child parent segment ::placeholder) segments)
-      (update-or-create-child parent segment value))))
+  {:pre [(re-matches #"/.*" path)]}
+  (if (= path "/")
+    root
+    (loop [parent root [segment & segments] (rest (string/split path #"/"))]
+      (if (seq segments)
+        (recur (update-or-create-child parent segment ::placeholder) segments)
+        (update-or-create-child parent segment value)))))
 
 (defn- watch-client [root client]
   (let [client-events (async/tap client (async/chan 1))]
