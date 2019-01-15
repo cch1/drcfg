@@ -91,7 +91,7 @@
   (open [this connect-string timeout] ; TODO: allow parameterization of ZooKeeper instantiation
     (let [raw-client-events (async/chan 1 (map event-to-map))
           client-watcher (make-watcher (partial async/put! raw-client-events))]
-      (reset! client-atom (ZooKeeper. connect-string timeout client-watcher (boolean true)))
+      (reset! client-atom (ZooKeeper. connect-string timeout client-watcher true))
       (async/put! client-events [::started @client-atom])
       (async/go-loop []
         (if-let [{:keys [event-type keeper-state path] :as event} (async/alt! raw-client-events ([v] v) commands nil)]
@@ -106,7 +106,7 @@
                               (async/put! client-events [::disconnected @client-atom])
                               (recur))
               :Expired (do (log/warnf "Session Expired!")
-                           (let [z' (ZooKeeper. connect-string timeout client-watcher (boolean true))]
+                           (let [z' (ZooKeeper. connect-string timeout client-watcher true)]
                              ;; Do we need to close the old client?
                              (async/put! client-events [::expired @client-atom])
                              (swap! client-atom (constantly z'))
