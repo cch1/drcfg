@@ -134,8 +134,7 @@
                                  async? false}}]
     (let [stat (Stat.)
           create-mode (create-modes {:persistent? persistent?, :sequential? sequential?})]
-      (try (with-client (.create client path data acl create-mode stat))
-           {:stat (stat-to-map stat)}
+      (try (with-client (.create client path data acl create-mode))
            (catch KeeperException$NodeExistsException e
              false))))
   (create-all [this path options]

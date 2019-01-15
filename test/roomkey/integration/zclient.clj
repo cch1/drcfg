@@ -65,7 +65,7 @@
         (with-open [$c (open $client (.getConnectString test-server) 5000)]
           c  => (eventually-streams 2 3000 (just [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])
                                                   (just [:roomkey.zclient/connected (partial instance? ZooKeeper)])]))
-          (create-znode $c "/myznode" {:data (.getBytes "Hello World") :persistent? true}) => (contains {:stat map?})
+          (create-znode $c "/myznode" {:data (.getBytes "Hello World") :persistent? true}) => truthy
           (create-znode $c "/myznode/child" {}) => truthy
           (exists $c "/myznode" {}) => (contains {:version 0})
           (exists $c "/notmyznode" {}) => falsey
