@@ -57,7 +57,7 @@
               (cond
                 (neg? delta) (log/warnf "Received negative version delta [%d -> %d] for %s" version version' (znode/path znode))
                 (zero? delta) (log/tracef "Received zero version delta [%d -> %d] for %s" version version' (znode/path znode))
-                (> delta 1) (log/infof "Received non-sequential version delta [%d -> %d] for %s" version version' (znode/path znode)))
+                (and (> delta 1) (not (neg? version))) (log/infof "Received non-sequential version delta [%d -> %d] for %s" version version' (znode/path znode)))
               (if (valid? @validator value')
                 (do (reset! cache n)
                     (async/thread (doseq [[k w] @watches]
