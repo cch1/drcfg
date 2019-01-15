@@ -178,3 +178,17 @@
          (let [la (>- n "default-value" :meta {:doc "My Default Doc"})]
            (with-awaited-connection *root* *connect-string* sandbox
              la => (eventually-refers-to 10000 "value")))))
+
+(fact "def>- expands correctly"
+      (macroexpand-1 `(def>- y [12] :validator identity :meta {:doc "My Documentation"}))
+      => (just `(let ~(just [symbol? (just `(ns-path #".+/y"))])
+                  ~(just `(when ~truthy
+                            ~(just `(>- ~(just `(str ~symbol? "/.metadata")) ~(just {:doc "My Documentation"})))))
+                  ~(just `(def y ~(just `(apply >- ~symbol? [12] (:validator identity))))))))
+
+(fact "def> expands correctly"
+      (macroexpand-1 `(def> ^:foo y "My Documentation" [12] :validator identity))
+      => (just `(let ~(just [symbol? (just `(ns-path #".+/y"))])
+                  ~(just `(when ~truthy
+                            ~(just `(>- ~(just `(str ~symbol? "/.metadata")) ~(just {:doc "My Documentation" :foo true})))))
+                  ~(just `(def y ~(just `(apply >- ~symbol? [12] (:validator identity))))))))

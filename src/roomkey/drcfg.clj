@@ -4,6 +4,7 @@
             [roomkey.znode :as znode]
             [clojure.core.async :as async]
             [clojure.string :as string]
+            [clojure.tools.macro :refer [name-with-attributes]]
             [clojure.tools.logging :as log]))
 
 ;;; USAGE:  see /roomkey/README.md
@@ -11,9 +12,6 @@
 (def ^:dynamic *root* (znode/create-root))
 
 (def zk-prefix "drcfg")
-
-(defmacro ns-path [n]
-  `(str "/" (str *ns*) "/" ~n))
 
 (defn open
   "Open a connection with `root` in `scope` to the ZooKeeper cluster defined by `hosts`"
@@ -55,18 +53,35 @@
     (add-watch z :logger (fn [k r o n] (log/tracef "Value of %s update: old: %s; s" name o n)))
     z))
 
-;; TODO: Switch to Clojure conventions for standard metadata
-;; Reference: https://stackoverflow.com/questions/25478158/how-do-i-use-clojure-tools-macro-name-with-attributes
-(defmacro def>-
+(defmacro ns-path [n]
+  `(str "/" (str *ns*) "/" ~n))
+
+(defmacro ^:deprecated def>-
   "Def a config reference with the given name.  The current namespace will be
   automatically prepended to create the zookeeper path -when refactoring, note
   that the namespace may change, leaving the old values stored in zookeeper
   orphaned and reverting to the default value."
   [name default & options]
   (let [nstr (str name)
-        {m :meta :as o} (apply hash-map options)]
-    `(def ~name (let [bpath# (ns-path ~nstr)
-                      bref# (apply >- bpath# ~default (mapcat identity
-                                                              (select-keys (hash-map ~@options) [:validator])))]
-                  (when ~m (>- (str bpath# "/.metadata") ~m))
-                  bref#))))
+        {m :meta :as o} (apply hash-map options)
+        options (mapcat identity
+                        (select-keys (apply hash-map options) [:validator]))]
+    `(let [bpath# (ns-path ~nstr)]
+       (when ~m (>- (str bpath# "/.metadata") ~m))
+       (def ~name (apply >- bpath# ~default ~options)))))
+
+;; Reference: https://stackoverflow.com/questions/25478158/how-do-i-use-clojure-tools-macro-name-with-attributes
+(defmacro def>
+  "Def a config reference with the given name and default value.  The current namespace will be automatically prepended
+  to create the zookeeper path -when refactoring, note that the namespace may change, leaving the old values stored in
+  zookeeper orphaned and reverting to the default value.  Documentation and var metadata can be provided in the usual way
+  and are stored in a related ZooKeeper node.  Options (currently just `validator`) are provided after the default value."
+  [symb & args]
+  (let [nstr (str symb)
+        [symb [default & options]] (name-with-attributes symb args)
+        m (meta symb)
+        options (mapcat identity
+                        (select-keys (apply hash-map options) [:validator]))]
+    `(let [bpath# (ns-path ~nstr)]
+       (when ~m (>- (str bpath# "/.metadata") ~m))
+       (def ~symb (apply >- bpath# ~default ~options)))))
