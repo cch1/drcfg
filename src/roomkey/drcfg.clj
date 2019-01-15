@@ -30,22 +30,21 @@
   ([connect-string] (db-initialize! connect-string nil))
   ([connect-string scope] (db-initialize! connect-string scope 5000))
   ([connect-string scope timeout]
-   (let [zroot (znode/create-root) ; fresh... no children... nobody should be watching backing client...
-         root-path (string/join "/" (filter identity ["" zk-prefix scope]))
-         drcfg-root (znode/add-descendant zroot root-path ::root)
+   (let [drcfg-root (znode/create-root (str "/" zk-prefix))
          data (async/pipe drcfg-root
                           (async/chan 1 (comp (filter (comp #{:roomkey.znode/datum :roomkey.znode/created!} :roomkey.znode/type))
                                               (map :roomkey.znode/type)))
-                          false)]
-     (with-open [zclient (znode/open zroot connect-string timeout)]
+                          false)
+         root (if-not scope drcfg-root (znode/add-descendant drcfg-root (str "/" scope) ::scoped-root))]
+     (with-open [zclient (znode/open root connect-string timeout)]
        (when-let [result (async/<!! (async/go-loop []
                                       (async/alt! data ([event] (case event
                                                                   :roomkey.znode/created! (do (log/infof "Database initialized") (recur))
                                                                   :roomkey.znode/datum true))
                                                   (async/timeout 10000) ([_] (log/warnf "Timed out waiting for database initialization") false))))]
-         (log/infof "Database ready at %s [%s]" connect-string (str drcfg-root))
+         (log/infof "Database ready at %s [%s]" connect-string (str root))
          (Thread/sleep 1000) ; let ZNode acquisition settle down solely to avoid innocuous "Lost connection while processing" errors.
-         zroot)))))
+         root)))))
 
 (defn >-
   "Create a config reference with the given name (must be fully specified,

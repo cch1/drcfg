@@ -134,13 +134,13 @@
           $child1 => (eventually-streams 1 2000 ::timeout))))
 
 (fact "Root node behaves like leaves"
-      (let [$root (create-root 10)]
+      (let [$root (create-root "/" 10)]
         (with-awaited-open-connection $root (str connect-string sandbox) 500
           $root => (eventually-streams 3 2000 (just [{::znode/type ::znode/watch-start}
                                                      {::znode/type ::znode/created! ::znode/value 10}
                                                      (just #::znode{:type ::znode/datum :value 10 :stat (contains {:version 0})})]))))
 
-      (let [$root (create-root nil)]
+      (let [$root (create-root "/" nil)]
         (with-awaited-open-connection $root (str connect-string sandbox) 500
           $root => (eventually-streams 2 2000 (just [{::znode/type ::znode/watch-start}
                                                      (just #::znode{:type ::znode/datum :value 10 :stat (contains {:version 0})})])))))

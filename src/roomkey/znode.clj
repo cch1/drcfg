@@ -236,11 +236,12 @@
 
 (defn create-root
   "Create a root znode and watch for client status changes to manage watches"
-  ([] (create-root ::root))
-  ([initial-value] (create-root initial-value (zclient/create)))
-  ([initial-value zclient]
+  ([] (create-root ""))
+  ([abs-path] (create-root abs-path ::root))
+  ([abs-path initial-value] (create-root abs-path initial-value (zclient/create)))
+  ([abs-path initial-value zclient]
    (let [events (async/chan (async/sliding-buffer 4))
-         z (->ZNode zclient nil "" initial-value (ref {}) events)]
+         z (->ZNode zclient nil abs-path initial-value (ref {}) events)]
      (watch-client z zclient)
      z)))
 
