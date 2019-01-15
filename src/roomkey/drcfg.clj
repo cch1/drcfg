@@ -34,18 +34,18 @@
          root-path (string/join "/" (filter identity ["" zk-prefix scope]))
          drcfg-root (znode/add-descendant zroot root-path ::root)
          data (async/pipe drcfg-root
-                          (async/chan 1 (comp (filter (comp #{:roomkey.znode/datum :roomkey.znode/actualized!} :roomkey.znode/type))
+                          (async/chan 1 (comp (filter (comp #{:roomkey.znode/datum :roomkey.znode/created!} :roomkey.znode/type))
                                               (map :roomkey.znode/type)))
                           false)]
      (with-open [zclient (znode/open zroot connect-string timeout)]
        (when-let [result (async/<!! (async/go-loop []
                                       (async/alt! data ([event] (case event
-                                                                  :roomkey.znode/actualized! (do (log/infof "Database initialized") (recur))
+                                                                  :roomkey.znode/created! (do (log/infof "Database initialized") (recur))
                                                                   :roomkey.znode/datum true))
                                                   (async/timeout 10000) ([_] (log/warnf "Timed out waiting for database initialization") false))))]
          (log/infof "Database ready at %s [%s]" connect-string (str drcfg-root))
          (Thread/sleep 1000) ; let ZNode acquisition settle down solely to avoid innocuous "Lost connection while processing" errors.
-         result)))))
+         zroot)))))
 
 (defn >-
   "Create a config reference with the given name (must be fully specified,
