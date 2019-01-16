@@ -76,11 +76,11 @@
   (exists [this path options] "Determine if the ZNode at the given path exists"))
 
 (defmacro with-client
-  "An unhygenic macro that captures `client-atom` and `path` & binds `client` to manage connection issues"
+  "An unhygenic macro that captures `this` and `path` & binds `client` to manage connection issues"
   [& body]
   (let [emessage "Lost connection while processing ZooKeeper requests"]
-    `(try (if-let [~'client (deref ~'client-atom)]
-            ~@body
+    `(try (if-let [~'client (.connected? ~'this)]
+            (do ~@body)
             (throw (ex-info "Client unavailable while processing ZooKeeper requests" {:path ~'path})))
           (catch KeeperException$SessionExpiredException e# ; watches are deleted on session expiration
             (throw (ex-info ~emessage {:path ~'path} e#)))
@@ -121,7 +121,9 @@
   (close [this]
     (async/put! commands ::close)
     this)
-  (connected? [this] (= :CONNECTED (some-> @client-atom .getState .toString keyword)))
+  (connected? [this] (when-let [client @client-atom]
+                       (when (= :CONNECTED (some-> client .getState .toString keyword))
+                         client)))
   ZooKeeperFacing
   (delete [this path version {:keys [async? callback context]
                               :or {async? false
