@@ -63,7 +63,8 @@
 ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html
 (defprotocol Connectable
   (open [this connect-string timeout] "Open the connection")
-  (close [this] "Close the connection"))
+  (close [this] "Close the connection")
+  (connected? [this] "Is this client currently connected to the ZooKeeper cluster?"))
 
 (defprotocol ZooKeeperFacing
   (create-znode [this path options] "Create a ZNode at the given path")
@@ -120,6 +121,7 @@
   (close [this]
     (async/put! commands ::close)
     this)
+  (connected? [this] (= :CONNECTED (some-> @client-atom .getState .toString keyword)))
   ZooKeeperFacing
   (delete [this path version {:keys [async? callback context]
                               :or {async? false

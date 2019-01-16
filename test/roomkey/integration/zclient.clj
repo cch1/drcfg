@@ -51,11 +51,14 @@
   (chatty-checker [actual] (extended-= (streams n timeout actual) expected)))
 
 (fact "Can create a client, open it and then close it with proper notifications arriving on supplied channel"
-      (let [c (async/chan 1)]
-        (with-open [$c (open (create) $cstring0 5000)]
+      (let [events (async/chan 1)
+            $c (create)]
+        (connected? $c) => falsey
+        (with-open [$c (open $c $cstring0 5000)]
           $c => (partial instance? ZClient)
-          (async/<!! (async/tap $c c)) => (just [:roomkey.zclient/connected (partial instance? ZooKeeper)])
-          $c => (refers-to (partial instance? ZooKeeper)))))
+          (async/<!! (async/tap $c events)) => (just [:roomkey.zclient/connected (partial instance? ZooKeeper)])
+          $c => (refers-to (partial instance? ZooKeeper))
+          (connected? $c) => truthy)))
 
 (fact "Client can perform operations on znodes"
       (let [test-server (TestingServer. true)
