@@ -75,17 +75,30 @@
   (delete [this path version options] "Delete the znode at the given path, asserting its current version")
   (exists [this path options] "Determine if the ZNode at the given path exists"))
 
+;; https://github.com/liwp/again/blob/master/src/again/core.clj
+(defn with-retries
+  [f]
+  (loop [[delay & delays] (take 10 (iterate #(int (* 3/2 %)) 50))]
+    (if-let [[result] (try
+                        [(f)]
+                        (catch KeeperException$ConnectionLossException e
+                          (when-not delay (throw e))))]
+      result
+      (do
+        (Thread/sleep delay)
+        (recur delays)))))
+
 (defmacro with-client
   "An unhygenic macro that captures `this` and `path` & binds `client` to manage connection issues"
   [& body]
   (let [emessage "Lost connection while processing ZooKeeper requests"]
     `(try (if-let [~'client (.connected? ~'this)]
-            (do ~@body)
-            (throw (ex-info "Client unavailable while processing ZooKeeper requests" {:path ~'path})))
+            (with-retries (fn [] ~@body))
+            (throw (ex-info "Client unavailable while processing ZooKeeper requests" {::path ~'path ::type ::unavailable})))
           (catch KeeperException$SessionExpiredException e# ; watches are deleted on session expiration
-            (throw (ex-info ~emessage {:path ~'path} e#)))
-          (catch KeeperException$ConnectionLossException e# ; be patient...
-            (throw (ex-info ~emessage {:path ~'path} e#))))))
+            (throw (ex-info ~emessage {::path ~'path ::type ::session-expired} e#)))
+          (catch KeeperException$ConnectionLossException e# ; we've already been patient...
+            (throw (ex-info ~emessage {::path ~'path ::type ::connection-lost} e#))))))
 
 (deftype ZClient [commands client-atom client-events mux]
   Connectable
