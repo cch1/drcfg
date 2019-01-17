@@ -110,20 +110,21 @@
                 (async/close! ~channel))
             (throw e#)))))
 
-(deftype ZNode [client parent name ^:volatile-mutable initial-value children events]
+(deftype ZNode [client parent name initial-value children events]
   VirtualNode
   (path [this]
     (let [p (str (when parent (.path parent)) "/" name)]
       (if (.startsWith p "//") (.substring p 1) p)))
   (overlay [this v]
-    (when (not= initial-value v)
-      (assert (= initial-value ::placeholder) "Can't overwrite existing child")
-      ;; This should be safe, but it is a (Clojure) code smell.  It could possibly be avoided through rewriting of the ZNode tree.
-      (set! initial-value v))
+    ;; This should be safe, but it is a (Clojure) code smell.  It could possibly be avoided through rewriting of the ZNode tree.
+    (vswap! initial-value (fn [old-v] (if (not= old-v v)
+                                        (do (assert (= old-v ::placeholder) "Can't overwrite existing child")
+                                            v)
+                                        old-v)))
     this)
   (create-child [this n v] ; NB: This operation sets the parent of the child, but does not update the children of the parent
     (let [events (async/chan (async/sliding-buffer 4))]
-      (ZNode. client this n v (ref {}) events)))
+      (ZNode. client this n (volatile! v) (ref {}) events)))
   (update-or-create-child [this n v]
     (if-let [existing (get this n)]
       (if (= v ::placeholder) existing (overlay existing v))
@@ -133,7 +134,7 @@
   (children [this] (keys @children))
   BackedZNode
   (create [this] ; Synchronously create the node @ version zero, if not already present
-    (when (zclient/create-znode client (path this) {:persistent? true :data (*serialize* initial-value)})
+    (when (zclient/create-znode client (path this) {:persistent? true :data (*serialize* @initial-value)})
       (log/debugf "Created %s" (str this))
       true))
   (delete [this version]
@@ -160,7 +161,7 @@
               :NodeCreated (do
                              (when keeper-state
                                (log/debugf "Node %s created" (str this))
-                               (async/>!! ec {::type ::created! ::value initial-value}))
+                               (async/>!! ec {::type ::created! ::value @initial-value}))
                              (let [childs @children]
                                (doseq [[z c] childs] (watch z c)) ; watch must be in place before create
                                (doseq [[z c] childs] (with-connection znode-events (create z))))
@@ -262,7 +263,7 @@
   ([abs-path initial-value] (create-root abs-path initial-value (zclient/create)))
   ([abs-path initial-value zclient]
    (let [events (async/chan (async/sliding-buffer 4))
-         z (->ZNode zclient nil abs-path initial-value (ref {}) events)]
+         z (->ZNode zclient nil abs-path (volatile! initial-value) (ref {}) events)]
      (watch-client z zclient)
      z)))
 
