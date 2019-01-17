@@ -157,8 +157,9 @@
             (case event-type
               :None (do (assert (nil? (:path event)) "Keeper State event received with a path!") ; should be handled by default watch on client
                         (recur))
-              :NodeCreated (do (log/debugf "Node %s created" (str this))
-                               (when keeper-state (async/>!! ec {::type ::created! ::value initial-value}))
+              :NodeCreated (do (when keeper-state
+                                 (log/debugf "Node %s created" (str this))
+                                 (async/>!! ec {::type ::created! ::value initial-value}))
                                (with-connection znode-events
                                  (doseq [[z c] @children] (watch z c) (create z))) ; watch must be in place before create
                                (async/put! znode-events {:event-type :NodeDataChanged})
