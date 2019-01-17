@@ -66,17 +66,17 @@
   (overlay [this v] "Overlay the existing placeholder node's value with a concrete value")
   (children [this] "Return the immediate children of this node"))
 
-(defn- process-child-add
+(defn- process-child-insert
   [[z c :as a] events]
-  (async/>!! events {::type ::child-added ::child z})
-  (log/debugf "Processed add for %s" (str z))
+  (async/>!! events {::type ::child-inserted ::child z})
+  (log/debugf "Processed insert for %s" (str z))
   (watch z c)
   a)
 
-(defn- process-child-del
+(defn- process-child-remove
   [[z c :as a] events]
-  (async/>!! events {::type ::child-deleted ::child z})
-  (log/debugf "Processed delete for %s" (str z))
+  (async/>!! events {::type ::child-removed ::child z})
+  (log/debugf "Processed remove for %s" (str z))
   (async/close! c)
   a)
 
@@ -92,10 +92,10 @@
            child-dels (set/difference childs childs')]
        (doseq [child child-adds] (let [c (async/chan 1)] ; This is idempotent, modulo garbage collection
                                    (alter children assoc child c)
-                                   (send (agent [child c]) process-child-add events)))
+                                   (send (agent [child c]) process-child-insert events)))
        (doseq [child child-dels] (let [c (@children child)]
                                    (alter children dissoc child)
-                                   (send (agent [child c]) process-child-del events)))))))
+                                   (send (agent [child c]) process-child-remove events)))))))
 
 ;; http://insideclojure.org/2016/03/16/collections/
 ;; http://spootnik.org/entries/2014/11/06/playing-with-clojure-core-interfaces/index.html

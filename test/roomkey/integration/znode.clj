@@ -64,7 +64,7 @@
         (with-awaited-open-connection $root (str connect-string sandbox) 500
           $root => (eventually-streams 1 3000 (just [#::znode{:type ::znode/watch-start :node $root}]))
           $root => (eventually-streams 2 3000 (just #{(just #::znode{:type ::znode/datum :node $root :value ::znode/root :stat (contains {:version 0})})
-                                                      (just #::znode{:type ::znode/child-added :node $root :child (partial instance? roomkey.znode.ZNode)})}))
+                                                      (just #::znode{:type ::znode/child-inserted :node $root :child (partial instance? roomkey.znode.ZNode)})}))
           (let [$child (get-in $root ["child"])]
             $child => (partial instance? roomkey.znode.ZNode)
             $child => (eventually-streams 2 3000 (just [#::znode{:type ::znode/watch-start :node $child}
