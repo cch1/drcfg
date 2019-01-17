@@ -182,7 +182,7 @@
                                        (recur))
               (log/warnf "Unexpected znode event:state [%s:%s] while watching %s" event-type keeper-state (str this))))
           (do (log/debugf "The event channel for %s closed; shutting down" (str this))
-              (dosync (doseq [[child c] @children] (alter children update child (fn [c] (async/close! c) (async/chan 1))))) ; idempotent
+              (dosync (doseq [[child c] @children] (alter children update child (fn [c] (when c (async/close! c)) (async/chan 1))))) ; idempotent
               (async/>!! ec {::type ::watch-stop}))))
       (async/put! ec {::type ::watch-start}
                   (fn [_] (with-connection znode-events
