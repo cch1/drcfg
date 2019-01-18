@@ -75,7 +75,8 @@
   "Def a config reference with the given name and default value.  The current namespace will be automatically prepended
   to create the zookeeper path -when refactoring, note that the namespace may change, leaving the old values stored in
   zookeeper orphaned and reverting to the default value.  Documentation and var metadata can be provided in the usual way
-  and are stored in a related ZooKeeper node.  Options (currently just `validator`) are provided after the default value."
+  and are stored in a related ZooKeeper node.  Options (currently just `:validator`) are provided after the default value."
+  {:arglists '([symbol doc-string? attr-map? default options?])}
   [symb & args]
   (let [nstr (str symb)
         [symb [default & options]] (name-with-attributes symb args)
