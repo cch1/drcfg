@@ -33,10 +33,23 @@
 
 (defn- normalize-datum [{:keys [stat data]}] {::type ::datum ::value data ::stat stat})
 
-(def zdata-xform
+(defn- tap-to-atom
+  [a f]
+  (fn [rf]
+    (fn
+      ([] (rf))
+      ([result] (rf result))
+      ([result input]
+       (reset! a (f input))
+       (rf result input)))))
+
+(defn- zdata-xform
+  [stat-atom value-atom]
   (comp (map process-stat)
         (map deserialize-data)
-        (map normalize-datum)))
+        (map normalize-datum)
+        (tap-to-atom value-atom ::value)
+        (tap-to-atom stat-atom ::stat)))
 
 ;;; A proxy for a znode in a zookeeper cluster.
 ;;; * While offline (before the client connects) or online, a local tree can be created:
@@ -110,21 +123,21 @@
                 (async/close! ~channel))
             (throw e#)))))
 
-(deftype ZNode [client parent name initial-value children events]
+(deftype ZNode [client parent name stat value children events]
   VirtualNode
   (path [this]
     (let [p (str (when parent (.path parent)) "/" name)]
       (if (.startsWith p "//") (.substring p 1) p)))
   (overlay [this v]
     ;; This should be safe, but it is a (Clojure) code smell.  It could possibly be avoided through rewriting of the ZNode tree.
-    (vswap! initial-value (fn [old-v] (if (not= old-v v)
-                                        (do (assert (= old-v ::placeholder) "Can't overwrite existing child")
-                                            v)
-                                        old-v)))
+    (swap! value (fn [old-v] (if (not= old-v v)
+                               (do (assert (= old-v ::placeholder) "Can't overwrite existing child")
+                                   v)
+                               old-v)))
     this)
   (create-child [this n v] ; NB: This operation sets the parent of the child, but does not update the children of the parent
     (let [events (async/chan (async/sliding-buffer 4))]
-      (ZNode. client this n (volatile! v) (ref {}) events)))
+      (ZNode. client this n (atom {:version -1 :cversion -1 :aversion -1}) (atom v) (ref {}) events)))
   (update-or-create-child [this n v]
     (if-let [existing (get this n)]
       (if (= v ::placeholder) existing (overlay existing v))
@@ -134,7 +147,7 @@
   (children [this] (keys @children))
   BackedZNode
   (create [this] ; Synchronously create the node @ version zero, if not already present
-    (when (zclient/create-znode client (path this) {:persistent? true :data (*serialize* @initial-value)})
+    (when (zclient/create-znode client (path this) {:persistent? true :data (*serialize* @value)})
       (log/debugf "Created %s" (str this))
       true))
   (delete [this version]
@@ -144,11 +157,15 @@
   (watch [this znode-events]
     (log/debugf "Watching %s" (str this))
     (let [ec (async/chan 1 (map (fn tag [e] (assoc e ::node this))))
-          data-events (async/chan (async/sliding-buffer 4) zdata-xform)
-          delete-events (async/chan 1 (dedupe))] ; why won't a promise channel work here?
+          data-events (async/chan (async/sliding-buffer 4) (zdata-xform stat value))
+          delete-events (async/chan 1 (dedupe))  ; why won't a promise channel work here?
+          children-events (async/chan 5 (tap-to-atom stat ::stat))
+          exists-events (async/chan 1 (tap-to-atom stat ::stat))]
       (async/pipe ec events)
       (async/pipe data-events ec true)
       (async/pipe delete-events ec true)
+      (async/pipe children-events ec true)
+      (async/pipe exists-events ec true)
       ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
       ;; https://www.safaribooksonline.com/library/view/zookeeper/9781449361297/ch04.html
       (async/go-loop []
@@ -160,7 +177,7 @@
               :NodeCreated (do
                              (when keeper-state
                                (log/debugf "Node %s created" (str this))
-                               (async/>! ec {::type ::created! ::value @initial-value}))
+                               (async/>! ec {::type ::created! ::value @value}))
                              (let [childs @children]
                                (doseq [[z c] childs] (watch z c) (with-connection c (create z)))) ; watch must be in place before create
                              (async/>! znode-events {:event-type :NodeDataChanged})
@@ -178,19 +195,18 @@
               :NodeChildrenChanged (async/thread
                                      (with-connection znode-events
                                        (let [{:keys [stat paths]} (zclient/children client (path this) {:watcher (partial async/put! znode-events)})
-                                             [child-adds child-dels] (process-children-changes this children paths)
-                                             rf-to-chan (fn rf-to-chan ([] ec)
-                                                          ([ec] ec)
-                                                          ([ec event] (async/>!! ec event) ec))]
-                                         (async/onto-chan ec (map (fn [z] {::type ::child-inserted ::stat stat ::child z}) child-adds) false)
-                                         (async/onto-chan ec (map (fn [z] {::type ::child-removed ::stat stat ::child z}) child-dels) false))))
+                                             [child-adds child-dels] (process-children-changes this children paths)]
+                                         (when (or (seq child-adds) (seq child-dels))
+                                           (async/>!! children-events {::type ::children-changed ::stat stat
+                                                                       ::inserted child-adds ::removed child-dels})))))
               (log/warnf "Unexpected znode event:state [%s:%s] while watching %s" event-type keeper-state (str this)))
             (recur))
           (do (log/debugf "The event channel for %s closed; shutting down" (str this))
               (dosync (doseq [[child c] @children] (alter children update child (fn [c] (when c (async/close! c)) (async/chan 5))))) ; idempotent
               (async/>! ec {::type ::watch-stop}))))
       (async/>!! ec {::type ::watch-start})
-      (with-connection znode-events (when (zclient/exists client (path this) {:watcher (partial async/put! znode-events)})
+      (with-connection znode-events (when-let [stat (zclient/exists client (path this) {:watcher (partial async/put! znode-events)})]
+                                      (async/>!! exists-events {::type ::exists ::stat stat})
                                       (async/>!! znode-events {:event-type :NodeCreated})))))
   (compareVersionAndSet [this version value]
     (let [r (zclient/set-data client (path this) (*serialize* value) version {})]
@@ -261,10 +277,10 @@
   "Create a root znode and watch for client status changes to manage watches"
   ([] (create-root ""))
   ([abs-path] (create-root abs-path ::root))
-  ([abs-path initial-value] (create-root abs-path initial-value (zclient/create)))
-  ([abs-path initial-value zclient]
+  ([abs-path value] (create-root abs-path value (zclient/create)))
+  ([abs-path value zclient]
    (let [events (async/chan (async/sliding-buffer 4))
-         z (->ZNode zclient nil abs-path (volatile! initial-value) (ref {}) events)]
+         z (->ZNode zclient nil abs-path (atom {:version -1 :cversion -1 :aversion -1}) (atom value) (ref {}) events)]
      (watch-client z zclient)
      z)))
 
