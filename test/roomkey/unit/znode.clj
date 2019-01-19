@@ -50,3 +50,40 @@
         (get-in $root ["a1" "b" "c" "d"]) => $g4
         (get-in $root ["a9"]) => nil
         (get-in $root ["a9"] ::not-found) => ::not-found))
+
+(fact "ZNode supports `cloure.lang.Named`"
+      (let [$root (create-root)
+            $child (add-descendant $root "/a0" 0)
+            $g4 (add-descendant $root "/a1/b/c/d" 1)]
+        (name $g4) => "d"
+        (namespace $g4) => "/a1/b/c"))
+
+(fact "ZNode supports `cloure.lang.ILookup`"
+      (let [$root (create-root)
+            $child (add-descendant $root "/a0" 0)
+            $g4 (add-descendant $root "/a1/b/c/d" 1)]
+        (get $root "a0") => $child
+        (get $root "a") => nil?
+        (get-in $root ["a1" "b" "c" "d"]) => $g4))
+
+(fact "ZNode supports `cloure.lang.IMeta`"
+      (let [$root (create-root)
+            $child (add-descendant $root "/a0" 0)]
+        (meta $root) => (contains {:version -1 :cversion -1 :aversion -1})))
+
+(fact "ZNode supports `cloure.lang.IDeref`"
+      (let [$root (create-root)
+            $child (add-descendant $root "/a0" 0)]
+        (deref $child) => 0))
+
+(fact "ZNode supports `cloure.lang.Seqable`"
+      (let [$root (create-root)
+            $child0 (add-descendant $root "/a0" 0)
+            $child1 (add-descendant $root "/a1" 0)]
+        (seq $root) => (just #{$child0 $child1})))
+
+(fact "ZNode supports `cloure.lang.Seqable`"
+      (let [$root (create-root)
+            $child0 (add-descendant $root "/a0" 0)
+            $child1 (add-descendant $root "/a1" 0)]
+        (count $root) => 2))

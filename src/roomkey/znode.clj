@@ -229,6 +229,12 @@
   clojure.lang.IDeref
   (deref [this] @value)
 
+  clojure.lang.Seqable
+  (seq [this] (keys @children))
+
+  clojure.lang.Counted
+  (count [this] (count @children))
+
   ;; https://stackoverflow.com/questions/26622511/clojure-value-equality-and-sets
   ;; https://japan-clojurians.github.io/clojure-site-ja/reference/data_structures#Collections
   clojure.lang.IHashEq
