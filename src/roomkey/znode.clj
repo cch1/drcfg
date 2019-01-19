@@ -223,6 +223,12 @@
   (valAt [this item] (some #(let [z (key %)] (when (= (.name z) item) z)) @children))
   (valAt [this item not-found] (or (.valAt this item) not-found))
 
+  clojure.lang.IMeta
+  (meta [this] @stat)
+
+  clojure.lang.IDeref
+  (deref [this] @value)
+
   ;; https://stackoverflow.com/questions/26622511/clojure-value-equality-and-sets
   ;; https://japan-clojurians.github.io/clojure-site-ja/reference/data_structures#Collections
   clojure.lang.IHashEq
