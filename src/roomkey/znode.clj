@@ -125,9 +125,7 @@
 
 (deftype ZNode [client parent name stat value children events]
   VirtualNode
-  (path [this]
-    (let [p (str (when parent (.path parent)) "/" name)]
-      (if (.startsWith p "//") (.substring p 1) p)))
+  (path [this] (str (.getNamespace this) "/" (.getName this)))
   (overlay [this v]
     ;; This should be safe, but it is a (Clojure) code smell.  It could possibly be avoided through rewriting of the ZNode tree.
     (swap! value (fn [old-v] (if (not= old-v v)
@@ -217,7 +215,11 @@
 
   clojure.lang.Named
   (getName [this] name)
-  (getNamespace [this] (when parent (path parent)))
+  (getNamespace [this] (when parent
+                         (let [pn (.getName parent)]
+                           (when-not (empty? pn)
+                             (let [ns (string/join "/" [(.getNamespace parent) pn])]
+                               (if (.startsWith ns "//") (.substring ns 1) ns))))))
 
   clojure.lang.ILookup
   (valAt [this item] (some #(let [z (key %)] (when (= (.name z) item) z)) @children))
@@ -287,12 +289,17 @@
 
 (defn create-root
   "Create a root znode and watch for client status changes to manage watches"
-  ([] (create-root ""))
+  ([] (create-root "/"))
   ([abs-path] (create-root abs-path ::root))
   ([abs-path value] (create-root abs-path value (zclient/create)))
   ([abs-path value zclient]
-   (let [events (async/chan (async/sliding-buffer 4))
-         z (->ZNode zclient nil abs-path (atom {:version -1 :cversion -1 :aversion -1}) (atom value) (ref {}) events)]
+   (let [segments (seq (string/split abs-path #"/"))
+         [parent name] (if (seq segments) [(reify clojure.lang.Named
+                                             (getName [_] (string/join "/" (butlast segments)))
+                                             (getNamespace [_] nil)) (last segments)]
+                           [nil ""])
+         events (async/chan (async/sliding-buffer 4))
+         z (->ZNode zclient parent name (atom {:version -1 :cversion -1 :aversion -1}) (atom value) (ref {}) events)]
      (watch-client z zclient)
      z)))
 
