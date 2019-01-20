@@ -78,11 +78,10 @@
   and are stored in a related ZooKeeper node.  Options (currently just `:validator`) are provided after the default value."
   {:arglists '([symbol doc-string? attr-map? default options?])}
   [symb & args]
-  (let [nstr (str symb)
-        [symb [default & options]] (name-with-attributes symb args)
+  (let [[symb [default & options]] (name-with-attributes symb args)
         m (meta symb)
         options (mapcat identity
                         (select-keys (apply hash-map options) [:validator]))]
-    `(let [bpath# (ns-path ~nstr)]
+    `(let [bpath# (str "/" (string/replace (str *ns*) #"\." "/") "/" '~symb)]
        (when ~m (>- (str bpath# "/.metadata") ~m))
        (def ~symb (apply >- bpath# ~default ~options)))))
