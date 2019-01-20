@@ -6,6 +6,7 @@
   :license {:name "Copyright Hotel JV Services LLC"
             :distribution :manual
             :comments "All rights reserved"}
+  :aliases {"midje" ["with-profile" "+test" "midje"]}
   :release-tasks [["vcs" "assert-committed"]
                   ["v" "update"] ;; compute new version & tag it
                   ["vcs" "push"]
