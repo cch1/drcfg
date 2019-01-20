@@ -252,7 +252,7 @@
   java.lang.Object
   (equals [this other] (and (= (class this) (class other)) (= (path this) (path other)) (= (.client this) (.client other))))
   (hashCode [this] (.hashCode [(path this) client]))
-  (toString [this] (format "%s: %s" (.getName (class this)) (path this))))
+  (toString [this] (format "%s: %s" (.. this (getClass) (getSimpleName)) (path this))))
 
 (defn compare-version-and-set!
   "Atomically sets the value of the znode `z` to `newval` if and only if the current
