@@ -8,19 +8,19 @@
       (let [$root (create-root)]
         $root => (partial instance? roomkey.znode.ZNode)
         (path $root) => "/"
-        (children $root) => empty?))
+        (seq $root) => empty?))
 
 (fact "Can create a psuedo-root ZNode"
       (let [$root (create-root "/myroot")]
         $root => (partial instance? roomkey.znode.ZNode)
         (path $root) => "/myroot"
-        (children $root) => empty?))
+        (seq $root) => empty?))
 
 (fact "Can create and identify children of a node"
       (let [$root (create-root)]
         (add-descendant $root "/a0" "a0") => (partial instance? roomkey.znode.ZNode)
         (add-descendant $root "/a1" "a1") => (partial instance? roomkey.znode.ZNode)
-        (children $root) => (two-of (partial instance? roomkey.znode.ZNode))))
+        (seq $root) => (two-of (partial instance? roomkey.znode.ZNode))))
 
 (fact "Can create descendants of the root ZNode"
       (let [$root (create-root)]

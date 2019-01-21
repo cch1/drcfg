@@ -76,8 +76,7 @@
   (path [this] "Return the string path of this znode")
   (create-child [this name value] "Create a child of this node with the given name, default value and children")
   (update-or-create-child [this name value] "Update the existing child node or create a new child of this node with the given name and default value")
-  (overlay [this v] "Overlay the existing placeholder node's value with a concrete value")
-  (children [this] "Return the immediate children of this node"))
+  (overlay [this v] "Overlay the existing placeholder node's value with a concrete value"))
 
 (defn- process-children-changes
   "Atomically update the `children` reference from `parent` with the `paths` ensuring adds and deletes are processed exactly once"
@@ -129,7 +128,6 @@
       (let [child (create-child this n v)]
         (dosync (alter children conj child))
         child)))
-  (children [this] @children)
 
   BackedZNode
   (create [this] ; Synchronously create the node @ version zero, if not already present
@@ -242,7 +240,7 @@
   (deref [this] @value)
 
   clojure.lang.Seqable
-  (seq [this] @children)
+  (seq [this] (seq @children))
 
   clojure.lang.Counted
   (count [this] (count @children))
