@@ -306,3 +306,15 @@
 (defn open
   [znode & args]
   (apply zclient/open (.client znode) args))
+
+;; https://stackoverflow.com/questions/49373252/custom-pprint-for-defrecord-in-nested-structure
+;; https://stackoverflow.com/questions/15179515/pretty-printing-a-record-using-a-custom-method-in-clojure
+(remove-method clojure.core/print-method roomkey.znode.ZNode)
+(defmethod clojure.core/print-method ZNode
+  [znode ^java.io.Writer writer]
+  (.write writer (format "#<%s %s>" (.. znode (getClass) (getSimpleName)) (path znode))))
+
+(remove-method clojure.pprint/simple-dispatch ZNode)
+(defmethod clojure.pprint/simple-dispatch ZNode
+  [znode]
+  (pr znode))
