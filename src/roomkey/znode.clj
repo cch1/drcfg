@@ -66,7 +66,7 @@
 (defprotocol BackedZNode
   "A Proxy for a ZooKeeper znode"
   (create [this] "Create the znode backing this virtual node")
-  (watch [this znode-events] "Recursively watch the ZooKeeper znode and its children, processing updates to data and children into the given channel.
+  (watch [this] "Recursively watch the ZooKeeper znode and its children, recording updates to data and children in the returned channel.
   The channel can be closed to stop processing updates")
   (compareVersionAndSet [this version value] "Update the znode with the given value asserting the current version")
   (delete [this version] "Delete this znode, asserting the current version"))
@@ -79,18 +79,6 @@
   (overlay [this v] "Overlay the existing placeholder node's value with a concrete value")
   (children [this] "Return the immediate children of this node"))
 
-(defn- process-child-insert
-  [[z c :as a]]
-  (log/debugf "Processed insert for %s" (str z))
-  (watch z c)
-  a)
-
-(defn- process-child-remove
-  [[z c :as a]]
-  (log/debugf "Processed remove for %s" (str z))
-  (async/close! c)
-  a)
-
 (defn- process-children-changes
   "Atomically update the `children` reference from `parent` with the `paths` ensuring adds and deletes are processed exactly once"
   ;; NB The implied node changes have already been persisted (created and deleted) -here we manage the proxy data and associated processing
@@ -99,20 +87,19 @@
   (let [childs' (into #{} (comp (map (fn [p] (last (string/split p #"/"))))
                                 (map (fn [n] (create-child parent n ::unknown)))) paths)]
     (dosync
-     (let [childs (into #{} (keys @children))
+     (let [childs @children
            child-adds (set/difference childs' childs)
            child-dels (set/difference childs childs')]
-       (doseq [child child-adds] (let [c (async/chan 5)] ; This is idempotent, modulo garbage collection
-                                   (alter children assoc child c)
-                                   (send (agent [child c]) process-child-insert)))
-       (doseq [child child-dels] (let [c (@children child)]
-                                   (alter children dissoc child)
-                                   (send (agent [child c]) process-child-remove)))
+       (doseq [child child-adds] (alter children conj child))
+       (doseq [child child-dels] (alter children disj child))
        [child-adds child-dels]))))
 
 ;; http://insideclojure.org/2016/03/16/collections/
 ;; http://spootnik.org/entries/2014/11/06/playing-with-clojure-core-interfaces/index.html
+;; https://clojure.github.io/data.priority-map//index.html
 ;; https://github.com/clojure/data.priority-map/blob/master/src/main/clojure/clojure/data/priority_map.clj
+;; https://github.com/clojure/clojure/blob/master/src/jvm/clojure/lang/APersistentMap.java
+;; (filter #(.isInterface %) (ancestors (class #{})))
 
 (defmacro with-connection
   [channel & body]
@@ -135,14 +122,15 @@
     this)
   (create-child [this n v] ; NB: This operation sets the parent of the child, but does not update the children of the parent
     (let [events (async/chan (async/sliding-buffer 4))]
-      (ZNode. client this n (atom {:version -1 :cversion -1 :aversion -1}) (atom v) (ref {}) events)))
+      (ZNode. client this n (atom {:version -1 :cversion -1 :aversion -1}) (atom v) (ref #{}) events)))
   (update-or-create-child [this n v]
     (if-let [existing (get this n)]
       (if (= v ::placeholder) existing (overlay existing v))
       (let [child (create-child this n v)]
-        (dosync (alter children assoc child (async/chan 5)))
+        (dosync (alter children conj child))
         child)))
-  (children [this] (keys @children))
+  (children [this] @children)
+
   BackedZNode
   (create [this] ; Synchronously create the node @ version zero, if not already present
     (when (zclient/create-znode client (path this) {:persistent? true :data (*serialize* @value)})
@@ -152,9 +140,10 @@
     (zclient/delete client (path this) version {})
     (log/debugf "Deleted %s" (str this))
     true)
-  (watch [this znode-events]
+  (watch [this]
     (log/debugf "Watching %s" (str this))
-    (let [ec (async/chan 1 (map (fn tag [e] (assoc e ::node this))))
+    (let [znode-events (async/chan 5)
+          ec (async/chan 1 (map (fn tag [e] (assoc e ::node this))))
           data-events (async/chan (async/sliding-buffer 4) (zdata-xform stat value))
           delete-events (async/chan 1 (dedupe))  ; why won't a promise channel work here?
           children-events (async/chan 5 (tap-to-atom stat ::stat))
@@ -166,46 +155,67 @@
       (async/pipe exists-events ec true)
       ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
       ;; https://www.safaribooksonline.com/library/view/zookeeper/9781449361297/ch04.html
-      (async/go-loop []
+      (async/go-loop [cze {}]
         (if-let [{:keys [event-type keeper-state] :as event} (async/<! znode-events)]
           (do
             (log/debugf "Event [%s:%s] for %s" event-type keeper-state (str this))
-            (case event-type
-              :None (assert (nil? (:path event)) "Keeper State event received with a path!") ; should be handled by default watch on client
-              :NodeCreated (do
-                             (when keeper-state
-                               (log/debugf "Node %s created" (str this))
-                               (async/>! ec {::type ::created! ::value @value}))
-                             (let [childs @children]
-                               (doseq [[z c] childs] (watch z c) (with-connection c (create z)))) ; watch must be in place before create
-                             (async/>! znode-events {:event-type :NodeDataChanged})
-                             (async/>! znode-events {:event-type :NodeChildrenChanged}))
-              :NodeDeleted (do (log/debugf "Node %s deleted" (str this)) ; This event is generated by exists, data and child watches.
-                               (async/>! delete-events {::type ::deleted!})
-                               (async/close! znode-events)) ; shut down properly
-              :DataWatchRemoved (log/debugf "Data watch on %s removed" (str this))
-              :NodeDataChanged (async/thread
-                                 (with-connection znode-events
-                                   (async/>!! data-events (assoc (log/spy :trace (zclient/data client (path this)
-                                                                                               {:watcher (partial async/put! znode-events)}))
-                                                                 ::node this))))
-              :ChildWatchRemoved (log/debugf "Child watch on %s removed" (str this))
-              :NodeChildrenChanged (async/thread
-                                     (with-connection znode-events
-                                       (let [{:keys [stat paths]} (zclient/children client (path this) {:watcher (partial async/put! znode-events)})
-                                             [child-adds child-dels] (process-children-changes this children paths)]
-                                         (when (or (seq child-adds) (seq child-dels))
-                                           (async/>!! children-events {::type ::children-changed ::stat stat
-                                                                       ::inserted child-adds ::removed child-dels})))))
-              (log/warnf "Unexpected znode event:state [%s:%s] while watching %s" event-type keeper-state (str this)))
-            (recur))
+            (recur
+             (case event-type
+               :None (do (assert (nil? (:path event)) "Keeper State event received with a path!") cze) ; should be handled by default watch on client
+               :NodeCreated (do
+                              (when keeper-state
+                                (log/debugf "Node %s created" (str this))
+                                (async/>! ec {::type ::created! ::value @value}))
+                              (let [cze (reduce (fn [cze child]
+                                                  (assert (nil? (cze child)) "Child wants to be watched twice!")
+                                                  (let [c (watch child)]  ; watch must be in place before create to generate proper events
+                                                    (with-connection c (create child))
+                                                    (assoc cze child c)))
+                                                cze @children)]
+                                (async/>! znode-events {:event-type :NodeDataChanged})
+                                (async/>! znode-events {:event-type :NodeChildrenChanged})
+                                cze))
+               :NodeDeleted (do (log/debugf "Node %s deleted" (str this)) ; This event is generated by exists, data and child watches.
+                                (async/>! delete-events {::type ::deleted!})
+                                (async/close! znode-events) ; shut down properly
+                                cze)
+               :DataWatchRemoved (do (log/debugf "Data watch on %s removed" (str this)) cze)
+               :NodeDataChanged (do
+                                  (async/thread
+                                    (with-connection znode-events
+                                      (async/>!! data-events (assoc (log/spy :trace (zclient/data client (path this)
+                                                                                                  {:watcher (partial async/put! znode-events)}))
+                                                                    ::node this))))
+                                  cze)
+               :ChildWatchRemoved (do (log/debugf "Child watch on %s removed" (str this)) cze)
+               :NodeChildrenChanged (with-connection znode-events
+                                      (let [{:keys [stat paths]} (zclient/children client (path this) {:watcher (partial async/put! znode-events)})
+                                            [child-adds child-dels] (process-children-changes this children paths)]
+                                        (when (or (seq child-adds) (seq child-dels))
+                                          (async/>!! children-events {::type ::children-changed ::stat stat
+                                                                      ::inserted child-adds ::removed child-dels}))
+                                        (as-> cze cze
+                                          (reduce (fn [cze child]
+                                                    (log/debugf "Processed insert for %s" (str child))
+                                                    (assoc cze child (watch child))) cze child-adds)
+                                          (reduce (fn [cze child]
+                                                    (log/debugf "Processed remove for %s" (str child))
+                                                    (async/close! (cze child))
+                                                    (dissoc cze child)) cze child-dels))))
+               (do (log/warnf "Unexpected znode event:state [%s:%s] while watching %s" event-type keeper-state (str this))
+                   cze))))
           (do (log/debugf "The event channel for %s closed; shutting down" (str this))
-              (dosync (doseq [[child c] @children] (alter children update child (fn [c] (when c (async/close! c)) (async/chan 5))))) ; idempotent
+              (reduce (fn [cze [child c]]
+                        (async/close! c)
+                        (dissoc cze child))
+                      cze
+                      cze) ; idempotent
               (async/>! ec {::type ::watch-stop}))))
       (async/>!! ec {::type ::watch-start})
       (with-connection znode-events (when-let [stat (zclient/exists client (path this) {:watcher (partial async/put! znode-events)})]
                                       (async/>!! exists-events {::type ::exists ::stat stat})
-                                      (async/>!! znode-events {:event-type :NodeCreated})))))
+                                      (async/>!! znode-events {:event-type :NodeCreated})))
+      znode-events))
   (compareVersionAndSet [this version value]
     (let [r (zclient/set-data client (path this) (*serialize* value) version {})]
       (when r
@@ -222,7 +232,7 @@
                                (if (.startsWith ns "//") (.substring ns 1) ns))))))
 
   clojure.lang.ILookup
-  (valAt [this item] (some #(let [z (key %)] (when (= (.name z) item) z)) @children))
+  (valAt [this item] (some #(when (= (.name %) item) %) @children))
   (valAt [this item not-found] (or (.valAt this item) not-found))
 
   clojure.lang.IMeta
@@ -232,7 +242,7 @@
   (deref [this] @value)
 
   clojure.lang.Seqable
-  (seq [this] (keys @children))
+  (seq [this] @children)
 
   clojure.lang.Counted
   (count [this] (count @children))
@@ -279,8 +289,7 @@
     (async/go-loop [znode-events nil] ; start event listener loop
       (if-let [[event client] (async/<! client-events)]
         (recur (case event
-                 ::zclient/connected (let [znode-events (async/chan 5)]
-                                       (watch root znode-events)
+                 ::zclient/connected (let [znode-events (watch root)]
                                        (create root) ; root triggers blocking recursive actualization of tree
                                        znode-events)
                  ::zclient/closed (when znode-events (async/close! znode-events)) ; failed connections start but don't connect before closing?
@@ -299,7 +308,7 @@
                                              (getNamespace [_] nil)) (last segments)]
                            [nil ""])
          events (async/chan (async/sliding-buffer 4))
-         z (->ZNode zclient parent name (atom {:version -1 :cversion -1 :aversion -1}) (atom value) (ref {}) events)]
+         z (->ZNode zclient parent name (atom {:version -1 :cversion -1 :aversion -1}) (atom value) (ref #{}) events)]
      (watch-client z zclient)
      z)))
 
