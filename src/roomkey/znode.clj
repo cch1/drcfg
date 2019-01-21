@@ -73,18 +73,25 @@
 
 (defprotocol VirtualNode
   "A value-bearing node in a tree"
-  (path [this] "Return the string path of this znode")
-  (create-child [this name value] "Create a child of this node with the given name, default value and children")
-  (update-or-create-child [this name value] "Update the existing child node or create a new child of this node with the given name and default value")
+  (update-or-create-child [this path value] "Update the existing child or create a new child of this node at the given path & with the given default value")
   (overlay [this v] "Overlay the existing placeholder node's value with a concrete value"))
+
+(declare ->ZNode)
+
+(defn- new* ; NB: This operation does not update the children of the parent
+  ([client path] (new* client path ::unknown))
+  ([client path value]
+   (let [events (async/chan (async/sliding-buffer 4))]
+     (->ZNode client path (atom {:version -1 :cversion -1 :aversion -1}) (atom value) (ref #{}) events))))
 
 (defn- process-children-changes
   "Atomically update the `children` reference from `parent` with the `paths` ensuring adds and deletes are processed exactly once"
   ;; NB The implied node changes have already been persisted (created and deleted) -here we manage the proxy data and associated processing
   ;; TODO: https://tech.grammarly.com/blog/building-etl-pipelines-with-clojure
   [parent children paths]
-  (let [childs' (into #{} (comp (map (fn [p] (last (string/split p #"/"))))
-                                (map (fn [n] (create-child parent n ::unknown)))) paths)]
+  (let [childs' (into #{} (comp (map (fn [segment] (as-> (str (.path parent) "/" segment) s
+                                                     (if (.startsWith s "//") (.substring s 1) s))))
+                                (map (fn [path] (new* (.client parent) path)))) paths)]
     (dosync
      (let [childs @children
            child-adds (set/difference childs' childs)
@@ -109,9 +116,8 @@
                 (async/close! ~channel))
             (throw e#)))))
 
-(deftype ZNode [client parent name stat value children events]
+(deftype ZNode [client path stat value children events]
   VirtualNode
-  (path [this] (str (.getNamespace this) "/" (.getName this)))
   (overlay [this v]
     ;; This should be safe, but it is a (Clojure) code smell.  It could possibly be avoided through rewriting of the ZNode tree.
     (swap! value (fn [old-v] (if (not= old-v v)
@@ -119,23 +125,21 @@
                                    v)
                                old-v)))
     this)
-  (create-child [this n v] ; NB: This operation sets the parent of the child, but does not update the children of the parent
-    (let [events (async/chan (async/sliding-buffer 4))]
-      (ZNode. client this n (atom {:version -1 :cversion -1 :aversion -1}) (atom v) (ref #{}) events)))
-  (update-or-create-child [this n v]
-    (if-let [existing (get this n)]
-      (if (= v ::placeholder) existing (overlay existing v))
-      (let [child (create-child this n v)]
-        (dosync (alter children conj child))
-        child)))
+  (update-or-create-child [this path v]
+    (let [z' (new* client path v)]
+      (dosync (if (contains? @children z')
+                (let [z (@children z')]
+                  (when (not= v ::placeholder) (overlay z v))
+                  z)
+                ((alter children conj z') z')))))
 
   BackedZNode
   (create [this] ; Synchronously create the node @ version zero, if not already present
-    (when (zclient/create-znode client (path this) {:persistent? true :data (*serialize* @value)})
+    (when (zclient/create-znode client path {:persistent? true :data (*serialize* @value)})
       (log/debugf "Created %s" (str this))
       true))
   (delete [this version]
-    (zclient/delete client (path this) version {})
+    (zclient/delete client path version {})
     (log/debugf "Deleted %s" (str this))
     true)
   (watch [this]
@@ -181,13 +185,13 @@
                :NodeDataChanged (do
                                   (async/thread
                                     (with-connection znode-events
-                                      (async/>!! data-events (assoc (log/spy :trace (zclient/data client (path this)
+                                      (async/>!! data-events (assoc (log/spy :trace (zclient/data client path
                                                                                                   {:watcher (partial async/put! znode-events)}))
                                                                     ::node this))))
                                   cze)
                :ChildWatchRemoved (do (log/debugf "Child watch on %s removed" (str this)) cze)
                :NodeChildrenChanged (with-connection znode-events
-                                      (let [{:keys [stat paths]} (zclient/children client (path this) {:watcher (partial async/put! znode-events)})
+                                      (let [{:keys [stat paths]} (zclient/children client path {:watcher (partial async/put! znode-events)})
                                             [child-adds child-dels] (process-children-changes this children paths)]
                                         (when (or (seq child-adds) (seq child-dels))
                                           (async/>!! children-events {::type ::children-changed ::stat stat
@@ -210,27 +214,24 @@
                       cze) ; idempotent
               (async/>! ec {::type ::watch-stop}))))
       (async/>!! ec {::type ::watch-start})
-      (with-connection znode-events (when-let [stat (zclient/exists client (path this) {:watcher (partial async/put! znode-events)})]
+      (with-connection znode-events (when-let [stat (zclient/exists client path {:watcher (partial async/put! znode-events)})]
                                       (async/>!! exists-events {::type ::exists ::stat stat})
                                       (async/>!! znode-events {:event-type :NodeCreated})))
       znode-events))
   (compareVersionAndSet [this version value]
-    (let [r (zclient/set-data client (path this) (*serialize* value) version {})]
+    (let [r (zclient/set-data client path (*serialize* value) version {})]
       (when r
         (log/debugf "Set value for %s @ %s" (str this) version)
         (async/put! events {::type ::set! ::value value ::version version ::node this}))
       r))
 
   clojure.lang.Named
-  (getName [this] name)
-  (getNamespace [this] (when parent
-                         (let [pn (.getName parent)]
-                           (when-not (empty? pn)
-                             (let [ns (string/join "/" [(.getNamespace parent) pn])]
-                               (if (.startsWith ns "//") (.substring ns 1) ns))))))
+  (getName [this] (let [segments (string/split path #"/")] (or (last segments) "")))
+  (getNamespace [this] (when-let [segments (seq (remove empty? (butlast (string/split path #"/"))))]
+                         (str "/" (string/join "/" segments))))
 
   clojure.lang.ILookup
-  (valAt [this item] (some #(when (= (.name %) item) %) @children))
+  (valAt [this item] (some #(when (= (name %) item) %) @children))
   (valAt [this item not-found] (or (.valAt this item) not-found))
 
   clojure.lang.IMeta
@@ -248,7 +249,7 @@
   ;; https://stackoverflow.com/questions/26622511/clojure-value-equality-and-sets
   ;; https://japan-clojurians.github.io/clojure-site-ja/reference/data_structures#Collections
   clojure.lang.IHashEq
-  (hasheq [this] (hash [(path this) client]))
+  (hasheq [this] (hash [(.path this) client]))
 
   impl/ReadPort
   (take! [this handler] (impl/take! events handler))
@@ -258,9 +259,9 @@
   (close! [this] (impl/close! events))
 
   java.lang.Object
-  (equals [this other] (and (= (class this) (class other)) (= (path this) (path other)) (= (.client this) (.client other))))
-  (hashCode [this] (.hashCode [(path this) client]))
-  (toString [this] (format "%s: %s" (.. this (getClass) (getSimpleName)) (path this))))
+  (equals [this other] (and (= (class this) (class other)) (= path (.path other)) (= (.client this) (.client other))))
+  (hashCode [this] (.hashCode [path client]))
+  (toString [this] (format "%s: %s" (.. this (getClass) (getSimpleName)) path)))
 
 (defn compare-version-and-set!
   "Atomically sets the value of the znode `z` to `newval` if and only if the current
@@ -271,16 +272,17 @@
   (.compareVersionAndSet z current-version newval))
 
 (defn add-descendant
-  "Add a descendant ZNode to the given (sub)tree's `root` ZNode at the given (relative) `path` carrying the given `value`
+  "Add a descendant ZNode to the given parent's (sub)tree `root` ZNode at the given (relative) `path` carrying the given `value`
   creating placeholder intermediate nodes as required."
-  [root path value]
+  [parent path value]
   {:pre [(re-matches #"/.*" path)]}
-  (if (= path "/")
-    root
-    (loop [parent root [segment & segments] (rest (string/split path #"/"))]
-      (if (seq segments)
-        (recur (update-or-create-child parent segment ::placeholder) segments)
-        (update-or-create-child parent segment value)))))
+  (if-let [[_ head tail] (re-matches #"(/[^/]+)(.*)" path)]
+    (let [abs-path (as-> (str (.path parent) head) s
+                     (if (.startsWith s "//") (.substring s 1) s))]
+      (if (seq tail)
+        (recur (update-or-create-child parent abs-path ::placeholder) tail value)
+        (update-or-create-child parent abs-path value)))
+    parent))
 
 (defn- watch-client [root client]
   (let [client-events (async/tap client (async/chan 1))]
@@ -292,7 +294,7 @@
                                        znode-events)
                  ::zclient/closed (when znode-events (async/close! znode-events)) ; failed connections start but don't connect before closing?
                  znode-events))
-        (log/infof "The client event channel for %s has closed, shutting down" (path root))))))
+        (log/infof "The client event channel for %s has closed, shutting down" (.path root))))))
 
 (defn create-root
   "Create a root znode and watch for client status changes to manage watches"
@@ -301,12 +303,8 @@
   ([abs-path value] (create-root abs-path value (zclient/create)))
   ([abs-path value zclient]
    (let [segments (seq (string/split abs-path #"/"))
-         [parent name] (if (seq segments) [(reify clojure.lang.Named
-                                             (getName [_] (string/join "/" (butlast segments)))
-                                             (getNamespace [_] nil)) (last segments)]
-                           [nil ""])
          events (async/chan (async/sliding-buffer 4))
-         z (->ZNode zclient parent name (atom {:version -1 :cversion -1 :aversion -1}) (atom value) (ref #{}) events)]
+         z (->ZNode zclient abs-path (atom {:version -1 :cversion -1 :aversion -1}) (atom value) (ref #{}) events)]
      (watch-client z zclient)
      z)))
 
@@ -319,7 +317,7 @@
 (remove-method clojure.core/print-method roomkey.znode.ZNode)
 (defmethod clojure.core/print-method ZNode
   [znode ^java.io.Writer writer]
-  (.write writer (format "#<%s %s>" (.. znode (getClass) (getSimpleName)) (path znode))))
+  (.write writer (format "#<%s %s>" (.. znode (getClass) (getSimpleName)) (.path znode))))
 
 (remove-method clojure.pprint/simple-dispatch ZNode)
 (defmethod clojure.pprint/simple-dispatch ZNode

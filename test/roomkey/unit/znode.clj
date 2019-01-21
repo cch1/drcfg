@@ -7,13 +7,13 @@
 (fact "Can create a root ZNode"
       (let [$root (create-root)]
         $root => (partial instance? roomkey.znode.ZNode)
-        (path $root) => "/"
+        (.path $root) => "/"
         (seq $root) => empty?))
 
 (fact "Can create a psuedo-root ZNode"
       (let [$root (create-root "/myroot")]
         $root => (partial instance? roomkey.znode.ZNode)
-        (path $root) => "/myroot"
+        (.path $root) => "/myroot"
         (seq $root) => empty?))
 
 (fact "Can create and identify children of a node"
@@ -37,16 +37,16 @@
 (fact "ZNodes know their path in the tree"
       (let [$root (create-root)
             $child (add-descendant $root "/a" "a")]
-        (path $root) => "/"
-        (path $child) => "/a"
-        (path (add-descendant $root "/a/b/c/d" 4)) => "/a/b/c/d"
-        (path (add-descendant $child "/b1/c/d" 4)) => "/a/b1/c/d")
+        (.path $root) => "/"
+        (.path $child) => "/a"
+        (.path (add-descendant $root "/a/b/c/d" 4)) => "/a/b/c/d"
+        (.path (add-descendant $child "/b1/c/d" 4)) => "/a/b1/c/d")
       (let [$root (create-root "/a/b/c")
             $child (add-descendant $root "/d" "a")]
-        (path $root) => "/a/b/c"
-        (path $child) => "/a/b/c/d"
-        (path (add-descendant $root "/d/e" 4)) => "/a/b/c/d/e"
-        (path (add-descendant $child "/e1/f/g" 4)) => "/a/b/c/d/e1/f/g"))
+        (.path $root) => "/a/b/c"
+        (.path $child) => "/a/b/c/d"
+        (.path (add-descendant $root "/d/e" 4)) => "/a/b/c/d/e"
+        (.path (add-descendant $child "/e1/f/g" 4)) => "/a/b/c/d/e1/f/g"))
 
 (fact "ZNodes can be accessed by path"
       (let [$root (create-root)

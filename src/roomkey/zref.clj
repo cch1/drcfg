@@ -45,31 +45,31 @@
 
 (deftype ZRef [znode cache validator watches]
   ZNodeWatching
-  (path [this] (znode/path znode))
+  (path [this] (.path znode))
   (start [this]
     (let [data (async/pipe znode (async/chan 1 data-xform))]
       (async/go-loop []    ; start event listener loop
         (if-let [[value' version' :as n] (async/<! data)]
           (do
-            (log/debugf "Data element @ version %d received by %s" version' (znode/path znode))
+            (log/debugf "Data element @ version %d received by %s" version' (str this))
             (let [[value version :as o] @cache
                   delta (- version' version)]
               (cond
-                (neg? delta) (log/warnf "Received negative version delta [%d -> %d] for %s" version version' (znode/path znode))
-                (zero? delta) (log/tracef "Received zero version delta [%d -> %d] for %s" version version' (znode/path znode))
-                (and (> delta 1) (not (neg? version))) (log/infof "Received non-sequential version delta [%d -> %d] for %s" version version' (znode/path znode)))
+                (neg? delta) (log/warnf "Received negative version delta [%d -> %d] for %s" version version' (str this))
+                (zero? delta) (log/tracef "Received zero version delta [%d -> %d] for %s" version version' (str this))
+                (and (> delta 1) (not (neg? version))) (log/infof "Received non-sequential version delta [%d -> %d] for %s" version version' (str this)))
               (if (valid? @validator value')
                 (do (reset! cache n)
                     (async/thread (doseq [[k w] @watches]
                                     (try (w k this o n)
                                          (catch Exception e (log/errorf e "Error in watcher %s" k))))))
-                (log/warnf "Watcher received invalid value [%s], ignoring update for %s" value' (znode/path znode))))
+                (log/warnf "Watcher received invalid value [%s], ignoring update for %s" value' (str this))))
             (recur))
-          (log/debugf "The znode for %s has closed, shutting down" (znode/path znode))))))
+          (log/debugf "The znode for %s has closed, shutting down" (str this))))))
   (update! [this version value]
     (validate! @validator value)
     (let [r (znode/compare-version-and-set! znode version value)]
-      (when r (log/debugf "Set value for %s to %s" (znode/path znode) value version))
+      (when r (log/debugf "Set value for %s to %s" (str this) value version))
       r))
   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
   ;; https://www.safaribooksonline.com/library/view/zookeeper/9781449361297/ch04.html
@@ -114,14 +114,14 @@
           (do
             (when-not (pos? i) (throw (RuntimeException.
                                        (format "Aborting update of %s after %d failures over ~%dms"
-                                               (znode/path znode) *max-update-attempts* (* 2 n)))))
+                                               (str this) *max-update-attempts* (* 2 n)))))
             (Thread/sleep n)
             (recur (* 2 n) (dec i)))))))
   (swap [this f x] (.swap this (fn [v] (f v x))))
   (swap [this f x y] (.swap this (fn [v] (f v x y))))
   (swap [this f x y args] (.swap this (fn [v] (apply f v x y args))))
   java.lang.Object
-  (toString [this] (format "%s: %s [version %d]" (.getName (class this)) (znode/path znode) (last (.vDeref this)))))
+  (toString [this] (format "%s: %s [version %d]" (.getName (class this)) (.path znode) (last (.vDeref this)))))
 
 (defn create
   [root-znode path default & options]
