@@ -68,7 +68,6 @@
 
 (defprotocol ZooKeeperFacing
   (create-znode [this path options] "Create a ZNode at the given path")
-  (create-all [this path options] "Create a ZNode at the given path, adding ancestors as required")
   (data [this path options] "Fetch the data from the ZNode at the path")
   (set-data [this path data version options] "Set the data on the ZNode at the given path, asserting the current version")
   (children [this path options] "Discover paths for all child znodes at the server (optionally at the given path)")
@@ -154,13 +153,6 @@
       (try (with-client (.create client path data acl create-mode))
            (catch KeeperException$NodeExistsException e
              false))))
-  (create-all [this path options]
-    (loop [result-path "" [dir & children] (rest (string/split path #"/"))]
-      (let [result-path (str result-path "/" dir)
-            created? (create-znode this result-path (if (seq children) {:persistent? true} options))]
-        (if (seq children)
-          (recur result-path children)
-          created?))))
   (data [this path {:keys [watcher watch? async? callback context]
                     :or {watch? false
                          async? false
