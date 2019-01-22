@@ -259,7 +259,7 @@
   (close! [this] (impl/close! events))
 
   java.lang.Object
-  (equals [this other] (and (= (class this) (class other)) (= path (.path other)) (= (.client this) (.client other))))
+  (equals [this other] (and (= (class this) (class other)) (= (.path this) (.path other)) (= (.client this) (.client other))))
   (hashCode [this] (.hashCode [path client]))
   (toString [this] (format "%s: %s" (.. this (getClass) (getSimpleName)) path)))
 
