@@ -49,7 +49,7 @@
                                                       #::znode{:type ::znode/created! :node $child :value 0}
                                                       (just #::znode{:type ::znode/datum :node $child :value 0 :stat (contains {:version 0})})]))
           (compare-version-and-set! $child 0 1)
-          $child => (eventually-streams 2 5000 (just [#::znode{:type ::znode/set! :node $child :value 1 :version 0}
+          $child => (eventually-streams 2 5000 (just [(just #::znode{:type ::znode/set! :node $child :value 1 :version 0 :stat (contains {:version 1})})
                                                       (just #::znode{:type ::znode/datum :node $child :value 1 :stat (contains {:version 1})})])))))
 
 (fact "Existing ZNodes are acquired and stream their current value"
@@ -96,7 +96,7 @@
                                                       #::znode{:type ::znode/created! :node $child :value 0}
                                                       (just #::znode{:type ::znode/datum :node $child :value 0 :stat (contains {:version 0})})]))
           (compare-version-and-set! $child 0 1)
-          $child => (eventually-streams 2 2000 (just [#::znode{:type ::znode/set! :node $child :value 1 :version 0}
+          $child => (eventually-streams 2 2000 (just [(just #::znode{:type ::znode/set! :node $child :value 1 :version 0 :stat (contains {:version 1})})
                                                       (just #::znode{:type ::znode/datum :node $child :value 1 :stat (contains {:version 1})})]))))
 
       (let [$root (create-root)
@@ -134,7 +134,7 @@
                                                          (just #::znode{:type ::znode/exists :node $child1 :stat (contains {:version 0})})
                                                          (just #::znode{:type ::znode/datum :node $child1 :value 0 :stat (contains {:version 0})})]))
             (compare-version-and-set! $child0 0 1)
-            $child0 => (eventually-streams 2 2000 (just [#::znode{:type ::znode/set! :node $child0 :value 1 :version 0}
+            $child0 => (eventually-streams 2 2000 (just [(just #::znode{:type ::znode/set! :node $child0 :value 1 :version 0 :stat (contains {:version 1})})
                                                          (just #::znode{:type ::znode/datum :node $child0 :value 1 :stat (contains {:version 1})})]))
             $child1 => (eventually-streams 1 2000 (just [(just #::znode{:type ::znode/datum :node $child1 :value 1 :stat (contains {:version 1})})]))))))
 

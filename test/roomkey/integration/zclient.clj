@@ -73,7 +73,8 @@
           (exists $c "/myznode" {}) => (contains {:version 0})
           (exists $c "/notmyznode" {}) => falsey
           (data $c "/myznode" {}) => (just {:data (bytes-of "Hello World") :stat (contains {:version 0})})
-          (set-data $c "/myznode" (.getBytes "foo") 0 {}) => truthy
+          (set-data $c "/myznode" (.getBytes "foo") 0 {}) => (contains {:version 1})
+          (set-data $c "/myznode" (.getBytes "foo") 0 {}) => nil
           (Thread/sleep 20)
           (children $c "/myznode" {}) => (just {:paths (one-of string?) :stat map?})
           (delete $c "/myznode/child" 0 {}) => truthy

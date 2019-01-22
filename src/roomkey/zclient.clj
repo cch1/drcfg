@@ -163,9 +163,9 @@
   (set-data [this path data version {:keys [async? callback context]
                                      :or {async? false
                                           context path}}]
-    (boolean (try (with-client (stat-to-map (.setData client path data version)))
-                  (catch KeeperException e
-                    (when-not (= (.code e) KeeperException$Code/BADVERSION) (throw e))))))
+    (try (stat-to-map (with-client (.setData client path data version)))
+         (catch KeeperException e
+           (when-not (= (.code e) KeeperException$Code/BADVERSION) (throw e)))))
   (children [this path {:keys [watcher watch? async? callback context sort?]
                         :or {watch? false
                              async? false

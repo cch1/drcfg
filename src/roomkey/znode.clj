@@ -215,11 +215,13 @@
                                       (async/>!! znode-events {:event-type :NodeCreated})))
       znode-events))
   (compareVersionAndSet [this version value]
-    (let [r (zclient/set-data client path (*serialize* value) version {})]
-      (when r
-        (log/debugf "Set value for %s @ %s" (str this) version)
-        (async/put! events {::type ::set! ::value value ::version version ::node this}))
-      r))
+    (let [stat' (zclient/set-data client path (*serialize* value) version {})]
+      (when stat'
+        (let [{stat' :stat} (process-stat {:stat stat'})]
+          (log/debugf "Set value for %s @ %s" (str this) version)
+          (reset! stat stat')
+          (async/put! events {::type ::set! ::value value ::version version ::node this ::stat stat'})))
+      (boolean stat')))
 
   clojure.lang.Named
   (getName [this] (let [segments (string/split path #"/")] (or (last segments) "")))
