@@ -19,7 +19,7 @@
                  [org.apache.zookeeper/zookeeper "3.5.4-beta"]]
   :repositories {"rk-maven" {:url "s3p://rk-maven/releases/" :no-auth true}}
   :jvm-opts ["-Djava.io.tmpdir=./tmp"]
-  :profiles {:dev {:dependencies [[midje "1.9.5"]
+  :profiles {:dev {:dependencies [[midje "1.9.6"]
                                   [zookeeper-clj "0.9.4" :exclusions [org.apache.zookeeper/zookeeper commons-codec]]
                                   [org.apache.curator/curator-test "4.1.0"]
                                   [org.slf4j/slf4j-api "1.7.25"]
