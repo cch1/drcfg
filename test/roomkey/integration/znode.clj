@@ -75,17 +75,17 @@
                                                                      :removed empty?})}))
           (let [$child ($root "/child")]
             $child => (partial instance? roomkey.znode.ZNode)
-            $child => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start :node $child}
-                                                        (just #::znode{:type ::znode/exists :node $child :stat (contains {:version 0})})
-                                                        (just #::znode{:type ::znode/datum :node $child :value 0 :stat (contains {:version 0})})]))
+            $child => (eventually-streams 2 3000 (just [#::znode{:type ::znode/watch-start :node $child}
+                                                        (just #::znode{:type ::znode/exists :node $child :stat (contains {:version 0})})]))
+            $child => (eventually-streams 2 3000 (just #{(just #::znode{:type ::znode/children-changed :node $child :stat (contains {:cversion 1})
+                                                                        :inserted (one-of (partial instance? roomkey.znode.ZNode))
+                                                                        :removed empty?})
+                                                         (just #::znode{:type ::znode/datum :node $child :value 0 :stat (contains {:version 0})})}))
             (let [$grandchild ($root "/child/grandchild")]
               $grandchild => (partial instance? roomkey.znode.ZNode)
               $grandchild => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start :node $grandchild}
                                                                (just #::znode{:type ::znode/exists :node $grandchild :stat (contains {:version 0})})
                                                                (just #::znode{:type ::znode/datum :node $grandchild :value 0 :stat (contains {:version 0})})]))
-              $child => (eventually-streams 1 1000 (just #{(just #::znode{:type ::znode/children-changed :node $child :stat (contains {:cversion 1})
-                                                                          :inserted (just $grandchild)
-                                                                          :removed empty?})}))
               $child => (eventually-streams 1 1000 ::timeout))))))
 
 (fact "Existing ZNodes stream current value at startup when version greater than zero even when values match"
