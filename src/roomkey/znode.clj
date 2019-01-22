@@ -78,8 +78,8 @@
 
 (declare ->ZNode)
 
-(defn- new* ; NB: This operation does not update the children of the parent
-  ([client path] (new* client path ::unknown))
+(defn default ; NB: This operation does not update the children of the parent
+  ([client path] (default client path ::unknown))
   ([client path value]
    (let [events (async/chan (async/sliding-buffer 4))]
      (->ZNode client path (atom {:version -1 :cversion -1 :aversion -1}) (atom value) (ref #{}) events))))
@@ -91,7 +91,7 @@
   [parent children paths]
   (let [childs' (into #{} (comp (map (fn [segment] (as-> (str (.path parent) "/" segment) s
                                                      (if (.startsWith s "//") (.substring s 1) s))))
-                                (map (fn [path] (new* (.client parent) path)))) paths)]
+                                (map (fn [path] (default (.client parent) path)))) paths)]
     (dosync
      (let [childs @children
            child-adds (set/difference childs' childs)
@@ -126,7 +126,7 @@
                                old-v)))
     this)
   (update-or-create-child [this path v]
-    (let [z' (new* client path v)]
+    (let [z' (default client path v)]
       (dosync (if (contains? @children z')
                 (let [z (@children z')]
                   (when (not= v ::placeholder) (overlay z v))

@@ -2,7 +2,9 @@
   (:require [roomkey.znode :refer :all]
             [clojure.core.async :as async]
             [midje.sweet :refer :all]
-            [midje.checking.core :refer [extended-=]]))
+            [midje.checking.core :refer [extended-=]]
+            [clojure.test.check.generators :as gen]
+            [midje.experimental :refer [for-all]]))
 
 (fact "Can create a root ZNode"
       (let [$root (create-root)]
@@ -21,6 +23,51 @@
         (add-descendant $root "/a0" "a0") => (partial instance? roomkey.znode.ZNode)
         (add-descendant $root "/a1" "a1") => (partial instance? roomkey.znode.ZNode)
         (seq $root) => (two-of (partial instance? roomkey.znode.ZNode))))
+
+(for-all
+ [int gen/int]
+ {:num-tests 1000}
+ (fact "ZNodes know their identity"
+       (let [$root (create-root)
+             $child0 (add-descendant $root "/a" int)
+             $child1 (add-descendant $root "/a1/b" 1)
+             $child2 (add-descendant $root "/a1/b" 1)
+             z0 (default (.client $root) "/a1")
+             z1 (default (.client $root) "/a1")
+             z2 (default (.client $root) "/a2")]
+         (identical? z0 z1) => false
+         (identical? z0 z2) => false
+         (= z0 z1) => true
+         (not= z0 z2) => true
+         (= (hash z0) (hash z1)) => true
+         (not= (hash z0) (hash z2)) => true
+         (= (.hashCode z0) (.hashCode z1)) => true
+         (not= (.hashCode z0) (.hashCode z2)) => true
+         (identical? $child1 $child2) => false)))
+
+(for-all
+ [int gen/int]
+ {:num-tests 1000}
+ (fact "Existing children are never overwritten but may be overlaid"
+       (let [$root (create-root)
+             $child0 (add-descendant $root "/a" int)
+             $child1 (add-descendant $root "/a1/b" 1)
+             $child2 (add-descendant $root "/a2/b" 2)
+             z0 (default (.client $root) "/a1")
+             z1 (default (.client $root) "/a1")
+             z2 (default (.client $root) "/a2")]
+         (identical? z0 z1) => false
+         (= z0 z1) => true
+         (not= z0 z2) => true
+         (= (hash z0) (hash z1)) => true
+         (not= (hash z0) (hash z2)) => true
+         (= (.hashCode z0) (.hashCode z1)) => true
+         (not= (.hashCode z0) (.hashCode z2)) => true
+         (.path $child0) => "/a"
+         (.path $child1) => "/a1/b"
+         (.path $child2) => "/a2/b"
+         (identical? $child1 $child2) => false
+         )))
 
 (fact "Can create descendants of the root ZNode"
       (let [$root (create-root)]
