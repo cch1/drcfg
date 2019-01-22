@@ -246,12 +246,12 @@
     (get @children v))
 
   clojure.lang.IFn
-  (invoke [this path] (if-let [[_ head tail] (re-matches #"(/[^/]+)(.*)" path)]
-                        (let [abs-path (as-> (str (.path this) head) s
-                                         (if (.startsWith s "//") (.substring s 1) s))]
-                          (when-let [child (some #(when (= (.path %) abs-path) %) @children)]
-                            (child tail)))
-                        this))
+  (invoke [this p] (if-let [[_ head tail] (re-matches #"(/[^/]+)(.*)" p)]
+                     (let [abs-path (as-> (str path head) s
+                                      (if (.startsWith s "//") (.substring s 1) s))]
+                       (when-let [child (some #(when (= (.path %) abs-path) %) @children)]
+                         (child tail)))
+                     this))
   (applyTo [this args]
     (let [n (clojure.lang.RT/boundedLength args 1)]
       (case n
@@ -274,7 +274,7 @@
   ;; https://stackoverflow.com/questions/26622511/clojure-value-equality-and-sets
   ;; https://japan-clojurians.github.io/clojure-site-ja/reference/data_structures#Collections
   clojure.lang.IHashEq
-  (hasheq [this] (hash [(.path this) client]))
+  (hasheq [this] (hash [path client]))
 
   impl/ReadPort
   (take! [this handler] (impl/take! events handler))
