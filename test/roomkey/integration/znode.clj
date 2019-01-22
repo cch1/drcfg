@@ -73,12 +73,12 @@
                                                       (just #::znode{:type ::znode/children-changed :node $root :stat (contains {:cversion 1})
                                                                      :inserted (one-of (partial instance? roomkey.znode.ZNode))
                                                                      :removed empty?})}))
-          (let [$child (get-in $root ["child"])]
+          (let [$child ($root "/child")]
             $child => (partial instance? roomkey.znode.ZNode)
             $child => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start :node $child}
                                                         (just #::znode{:type ::znode/exists :node $child :stat (contains {:version 0})})
                                                         (just #::znode{:type ::znode/datum :node $child :value 0 :stat (contains {:version 0})})]))
-            (let [$grandchild (get-in $root ["child" "grandchild"])]
+            (let [$grandchild ($root "/child/grandchild")]
               $grandchild => (partial instance? roomkey.znode.ZNode)
               $grandchild => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start :node $grandchild}
                                                                (just #::znode{:type ::znode/exists :node $grandchild :stat (contains {:version 0})})

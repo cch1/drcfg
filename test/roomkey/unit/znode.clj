@@ -30,20 +30,28 @@
  (fact "ZNodes know their identity"
        (let [$root (create-root)
              $child0 (add-descendant $root "/a" int)
-             $child1 (add-descendant $root "/a1/b" 1)
-             $child2 (add-descendant $root "/a1/b" 1)
-             z0 (default (.client $root) "/a1")
-             z1 (default (.client $root) "/a1")
-             z2 (default (.client $root) "/a2")]
+             $child1 (add-descendant $root "/a11/b" 1)
+             $child2 (add-descendant $root "/a11/b" 1)
+             z0 (default (.client $root) "/a1" 1)
+             z1 (default (.client $root) "/a1" 1)
+             z2 (default (.client $root) "/a1" 2)
+             z3 (default (.client $root) "/a2" 1)]
          (identical? z0 z1) => false
-         (identical? z0 z2) => false
+         (identical? z0 z3) => false
+         (clojure.set/difference #{z0} #{z1}) => #{}
+         (clojure.set/difference #{z0} #{z2}) => #{}
+         (clojure.set/difference #{z1} #{z2}) => #{}
+         (clojure.set/difference #{z2} #{z1}) => #{}
          (= z0 z1) => true
-         (not= z0 z2) => true
+         (= z0 z2) => true
+         (not= z0 z3) => true
          (= (hash z0) (hash z1)) => true
-         (not= (hash z0) (hash z2)) => true
+         (= (hash z0) (hash z2)) => true
+         (not= (hash z0) (hash z3)) => true
          (= (.hashCode z0) (.hashCode z1)) => true
-         (not= (.hashCode z0) (.hashCode z2)) => true
-         (identical? $child1 $child2) => false)))
+         (= (.hashCode z0) (.hashCode z2)) => true
+         (not= (.hashCode z0) (.hashCode z3)) => true
+         (identical? $child1 $child2) => true)))
 
 (for-all
  [int gen/int]
@@ -95,15 +103,6 @@
         (.path (add-descendant $root "/d/e" 4)) => "/a/b/c/d/e"
         (.path (add-descendant $child "/e1/f/g" 4)) => "/a/b/c/d/e1/f/g"))
 
-(fact "ZNodes can be accessed by path"
-      (let [$root (create-root)
-            $child (add-descendant $root "/a0" 0)
-            $g4 (add-descendant $root "/a1/b/c/d" 1)]
-        (get-in $root ["a0"]) => $child
-        (get-in $root ["a1" "b" "c" "d"]) => $g4
-        (get-in $root ["a9"]) => nil
-        (get-in $root ["a9"] ::not-found) => ::not-found))
-
 (fact "ZNode supports `cloure.lang.Named`"
       (let [$root (create-root)
             $child (add-descendant $root "/a0" 0)
@@ -123,14 +122,6 @@
         (namespace $child) => "/a/b/c"
         (name $g4) => "g"
         (namespace $g4) => "/a/b/c/d/e/f"))
-
-(fact "ZNode supports `cloure.lang.ILookup`"
-      (let [$root (create-root)
-            $child (add-descendant $root "/a0" 0)
-            $g4 (add-descendant $root "/a1/b/c/d" 1)]
-        (get $root "a0") => $child
-        (get $root "a") => nil?
-        (get-in $root ["a1" "b" "c" "d"]) => $g4))
 
 (fact "ZNode supports `cloure.lang.IMeta`"
       (let [$root (create-root)
@@ -153,3 +144,22 @@
             $child0 (add-descendant $root "/a0" 0)
             $child1 (add-descendant $root "/a1" 0)]
         (count $root) => 2))
+
+(fact "ZNode supports `ITransientCollection` and `ITransientSet`"
+      (let [$root (create-root)
+            z0 (default (.client $root) "/a1")
+            z1 (default (.client $root) "/a1")]
+        (conj! $root z0) => $root
+        (contains? $root z0) => true
+        (get $root z0) => z0 ; short-circuits to ILookup/valAt with string key
+        (disj! $root z0) => $root
+        (contains? $root z0) => false
+        (get $root z0) => falsey))
+
+(fact "ZNode supports `IFn`"
+      (let [$root (create-root)
+            $child (add-descendant $root "/a/b/c" 0)]
+        ($root "/a") => (partial instance? roomkey.znode.ZNode)
+        ($root "/a/b/c") => $child
+        ($root "/a/dddb/c") => nil?
+        (apply $root ["/a/b"]) => (partial instance? roomkey.znode.ZNode)))

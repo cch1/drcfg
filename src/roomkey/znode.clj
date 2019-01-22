@@ -127,11 +127,7 @@
     this)
   (update-or-create-child [this path v]
     (let [z' (default client path v)]
-      (dosync (if (contains? @children z')
-                (let [z (@children z')]
-                  (when (not= v ::placeholder) (overlay z v))
-                  z)
-                ((alter children conj z') z')))))
+      (get (conj! this z') z')))
 
   BackedZNode
   (create [this] ; Synchronously create the node @ version zero, if not already present
@@ -230,9 +226,36 @@
   (getNamespace [this] (when-let [segments (seq (remove empty? (butlast (string/split path #"/"))))]
                          (str "/" (string/join "/" segments))))
 
-  clojure.lang.ILookup
-  (valAt [this item] (some #(when (= (name %) item) %) @children))
-  (valAt [this item not-found] (or (.valAt this item) not-found))
+  clojure.lang.ITransientCollection
+  (conj [this znode]
+    (dosync (if (contains? @children znode)
+              (let [v @znode]
+                (when (not= v ::placeholder) (overlay (@children znode) v)))
+              (alter children conj znode)))
+    this)
+
+  clojure.lang.ITransientSet
+  (disjoin [this v]
+    (dosync (alter children disj v))
+    this)
+  (contains [this v]
+    (contains? @children v))
+  (get [this v] ; This is used by `core/get` when ILookup is not implemented
+    (get @children v))
+
+  clojure.lang.IFn
+  (invoke [this path] (if-let [[_ head tail] (re-matches #"(/[^/]+)(.*)" path)]
+                        (let [abs-path (as-> (str (.path this) head) s
+                                         (if (.startsWith s "//") (.substring s 1) s))]
+                          (when-let [child (some #(when (= (.path %) abs-path) %) @children)]
+                            (child tail)))
+                        this))
+  (applyTo [this args]
+    (let [n (clojure.lang.RT/boundedLength args 1)]
+      (case n
+        0 (throw (clojure.lang.ArityException. n (.. this (getClass) (getSimpleName))))
+        1 (.invoke this (first args))
+        (throw (clojure.lang.ArityException. n (.. this (getClass) (getSimpleName)))))))
 
   clojure.lang.IMeta
   (meta [this] @stat)
