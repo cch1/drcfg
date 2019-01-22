@@ -147,7 +147,7 @@
           $child0 => (eventually-streams 3 2000 (just [#::znode{:type ::znode/watch-start :node $child0}
                                                        #::znode{:type ::znode/created! :node $child0 :value 0}
                                                        (just #::znode{:type ::znode/datum :node $child0 :value 0 :stat (contains {:version 0})})])))
-        $child0 => (eventually-streams 1 1000 [#::znode{:type ::znode/watch-stop :node $child0}])
+        $child0 => (eventually-streams 1 2000 [#::znode{:type ::znode/watch-stop :node $child0}])
         (with-awaited-open-connection $root1 (str connect-string sandbox) 500
           $child1 => (eventually-streams 3 2000 (just [#::znode{:type ::znode/watch-start :node $child1}
                                                        (just #::znode{:type ::znode/exists :node $child1 :stat (contains {:version 0})})
