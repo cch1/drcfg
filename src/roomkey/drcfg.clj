@@ -82,6 +82,7 @@
         m (meta symb)
         options (mapcat identity
                         (select-keys (apply hash-map options) [:validator]))]
-    `(let [bpath# (str "/" (string/replace (str *ns*) #"\." "/") "/" '~symb)]
-       (when ~m (>- (str bpath# "/.metadata") ~m))
-       (def ~symb (apply >- bpath# ~default ~options)))))
+    `(let [bpath# (str "/" (string/replace (str *ns*) #"\." "/") "/" '~symb)
+           z# (apply >- bpath# ~default ~options)]
+       (when ~m (znode/add-descendant (.znode z#) "/.metadata" ~m))
+       (def ~symb z#))))
