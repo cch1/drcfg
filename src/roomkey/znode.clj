@@ -124,6 +124,11 @@
     (async/close! channel)
     nil))
 
+(defn- make-channel-error-handler
+  [znode]
+  (fn [e]
+    (log/errorf e "Exception while processing channel event for %s") znode))
+
 (deftype ZNode [client path stat value children events]
   VirtualNode
   (overlay [this v]
@@ -149,12 +154,13 @@
     true)
   (watch [this]
     (log/debugf "Watching %s" (str this))
-    (let [znode-events (async/chan 5)
-          ec (async/chan 1 (map (fn tag [e] (assoc e ::node this))))
-          data-events (async/chan (async/sliding-buffer 4) (zdata-xform stat value))
-          delete-events (async/chan 1 (dedupe))  ; why won't a promise channel work here?
-          children-events (async/chan 5 (comp (map process-stat) (tap-to-atom stat ::stat)))
-          exists-events (async/chan 1 (comp (map process-stat) (tap-to-atom stat ::stat)))
+    (let [handle-channel-error (make-channel-error-handler this)
+          znode-events (async/chan 5 identity handle-channel-error)
+          ec (async/chan 1 (map (fn tag [e] (assoc e ::node this))) handle-channel-error)
+          data-events (async/chan (async/sliding-buffer 4) (zdata-xform stat value) handle-channel-error)
+          delete-events (async/chan 1 (dedupe) handle-channel-error)  ; why won't a promise channel work here?
+          children-events (async/chan 5 (comp (map process-stat) (tap-to-atom stat ::stat)) handle-channel-error)
+          exists-events (async/chan 1 (comp (map process-stat) (tap-to-atom stat ::stat)) handle-channel-error)
           handle-connection-loss (make-connection-loss-handler this znode-events)]
       (async/pipe ec events)
       (async/pipe data-events ec true)
