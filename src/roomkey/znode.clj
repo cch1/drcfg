@@ -5,33 +5,41 @@
             [clojure.set :as set]
             [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as impl]
-            [clojure.tools.logging :as log]))
+            [clojure.tools.logging :as log])
+  (:import (java.time Instant OffsetDateTime)))
 
 ;; TODO: Support (de)serialization to a vector of [value metadata]
 (defn ^:dynamic *deserialize* [b] {:pre [(instance? (Class/forName "[B") b)]} (read-string (String. b "UTF-8")))
 
 (defn ^:dynamic *serialize* [obj] {:post [(instance? (Class/forName "[B") %)]} (.getBytes (binding [*print-dup* true] (pr-str obj))))
 
+(defn- normalize-datum [{:keys [stat data]}] {::type ::datum ::value data ::stat stat})
+
 (defn- process-stat
   "Process stat structure into useful data"
   [zdata]
   (-> zdata
       ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_timeInZk
-      (update-in [:stat :ctime] #(java.time.Instant/ofEpochMilli %))
-      (update-in [:stat :mtime] #(java.time.Instant/ofEpochMilli %))))
+      (update-in [::stat :ctime] #(Instant/ofEpochMilli %))
+      (update-in [::stat :mtime] #(Instant/ofEpochMilli %))))
 
 (defn- deserialize-data
   "Process raw zdata into usefully deserialized types and structure"
   [{node ::node :as zdata}]
-  (update zdata :data (fn [ba] (try (*deserialize* ba)
-                                    (catch java.lang.RuntimeException e
-                                      (log/warnf "Unable to deserialize znode data [%s]" (str node))
-                                      ::unable-to-deserialize)
-                                    (catch java.lang.AssertionError e
-                                      (log/warnf "No data: %s [%s]" ba (str node))
-                                      ::no-data)))))
+  (update zdata ::value (fn [ba] (try (*deserialize* ba)
+                                      (catch java.lang.RuntimeException e
+                                        (log/warnf "Unable to deserialize znode data [%s]" (str node))
+                                        ::unable-to-deserialize)
+                                      (catch java.lang.AssertionError e
+                                        (log/warnf "No data: %s [%s]" ba (str node))
+                                        ::no-data)))))
 
-(defn- normalize-datum [{:keys [stat data]}] {::type ::datum ::value data ::stat stat})
+(let [v1-epoch (Instant/parse "2019-01-01T00:00:00.00Z")]
+  (defn- decode-datum [{{mtime :mtime :as stat} ::stat value ::value :as zdata}]
+    (if (and (.isBefore v1-epoch mtime) (sequential? value))
+      (update zdata ::value (fn [[value metadata]]
+                              (if (instance? clojure.lang.IMeta value) (with-meta value metadata) value)))
+      zdata)))
 
 (defn- tap-to-atom
   [a f]
@@ -45,9 +53,10 @@
 
 (defn- zdata-xform
   [stat-atom value-atom]
-  (comp (map process-stat)
+  (comp (map normalize-datum)
+        (map process-stat)
         (map deserialize-data)
-        (map normalize-datum)
+        (map decode-datum)
         (tap-to-atom value-atom ::value)
         (tap-to-atom stat-atom ::stat)))
 
@@ -131,9 +140,10 @@
 
   BackedZNode
   (create [this] ; Synchronously create the node @ version zero, if not already present
-    (when (zclient/create-znode client path {:persistent? true :data (*serialize* @value)})
-      (log/debugf "Created %s" (str this))
-      true))
+    (let [data [@value (meta @value)]]
+      (when (zclient/create-znode client path {:persistent? true :data (*serialize* data)})
+        (log/debugf "Created %s" (str this))
+        true)))
   (delete [this version]
     (zclient/delete client path version {})
     (log/debugf "Deleted %s" (str this))
@@ -144,8 +154,8 @@
           ec (async/chan 1 (map (fn tag [e] (assoc e ::node this))))
           data-events (async/chan (async/sliding-buffer 4) (zdata-xform stat value))
           delete-events (async/chan 1 (dedupe))  ; why won't a promise channel work here?
-          children-events (async/chan 5 (tap-to-atom stat ::stat))
-          exists-events (async/chan 1 (tap-to-atom stat ::stat))]
+          children-events (async/chan 5 (comp (map process-stat) (tap-to-atom stat ::stat)))
+          exists-events (async/chan 1 (comp (map process-stat) (tap-to-atom stat ::stat)))]
       (async/pipe ec events)
       (async/pipe data-events ec true)
       (async/pipe delete-events ec true)
@@ -215,12 +225,12 @@
                                       (async/>!! znode-events {:event-type :NodeCreated})))
       znode-events))
   (compareVersionAndSet [this version value]
-    (let [stat' (zclient/set-data client path (*serialize* value) version {})]
+    (let [data [value (meta value)]
+          stat' (zclient/set-data client path (*serialize* data) version {})]
       (when stat'
-        (let [{stat' :stat} (process-stat {:stat stat'})]
-          (log/debugf "Set value for %s @ %s" (str this) version)
-          (reset! stat stat')
-          (async/put! events {::type ::set! ::value value ::version version ::node this ::stat stat'})))
+        (log/debugf "Set value for %s @ %s" (str this) version)
+        (reset! stat stat')
+        (async/put! events (process-stat {::type ::set! ::value value ::version version ::node this ::stat stat'})))
       (boolean stat')))
 
   clojure.lang.Named
