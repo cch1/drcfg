@@ -99,6 +99,15 @@
           (catch KeeperException$ConnectionLossException e# ; we've already been patient...
             (throw (ex-info ~emessage {::path ~'path ::type ::connection-lost} e#))))))
 
+(defmacro with-connection
+  "A hygenic macro that manages serious connection issues and provides a handler"
+  [ehandler & body]
+  `(try (do ~@body)
+        (catch clojure.lang.ExceptionInfo e#
+          (if-let [type# (some-> (ex-data e#) ::type)]
+            (~ehandler e# type#)
+            (throw e#)))))
+
 (deftype ZClient [commands client-atom client-events mux]
   Connectable
   (open [this connect-string timeout] ; TODO: allow parameterization of ZooKeeper instantiation

@@ -116,14 +116,13 @@
 ;; https://github.com/clojure/clojure/blob/master/src/jvm/clojure/lang/APersistentMap.java
 ;; (filter #(.isInterface %) (ancestors (class #{})))
 
-(defmacro with-connection
-  [channel & body]
-  `(try (do ~@body)
-        (catch clojure.lang.ExceptionInfo e#
-          (if-let [type# (some-> (ex-data e#) ::zclient/type)]
-            (do (log/infof "Unrecoverable client error (%s), shutting down watch" type#)
-                (async/close! ~channel))
-            (throw e#)))))
+(defn- make-connection-loss-handler
+  "Return a handler for client connection loss that closes the node event channel"
+  [znode channel]
+  (fn [e type]
+    (log/infof "Unrecoverable client error (%s) on %s, shutting down watch" type (str znode))
+    (async/close! channel)
+    nil))
 
 (deftype ZNode [client path stat value children events]
   VirtualNode
@@ -155,7 +154,8 @@
           data-events (async/chan (async/sliding-buffer 4) (zdata-xform stat value))
           delete-events (async/chan 1 (dedupe))  ; why won't a promise channel work here?
           children-events (async/chan 5 (comp (map process-stat) (tap-to-atom stat ::stat)))
-          exists-events (async/chan 1 (comp (map process-stat) (tap-to-atom stat ::stat)))]
+          exists-events (async/chan 1 (comp (map process-stat) (tap-to-atom stat ::stat)))
+          handle-connection-loss (make-connection-loss-handler this znode-events)]
       (async/pipe ec events)
       (async/pipe data-events ec true)
       (async/pipe delete-events ec true)
@@ -177,7 +177,7 @@
                               (let [cze (reduce (fn [cze child]
                                                   (assert (nil? (cze child)) "Child wants to be watched twice!")
                                                   (let [c (watch child)]  ; watch must be in place before create to generate proper events
-                                                    (with-connection c (create child))
+                                                    (zclient/with-connection (make-connection-loss-handler child c) (create child))
                                                     (assoc cze child c)))
                                                 cze @children)]
                                 (async/>! znode-events {:event-type :NodeDataChanged})
@@ -190,13 +190,13 @@
                :DataWatchRemoved (do (log/debugf "Data watch on %s removed" (str this)) cze)
                :NodeDataChanged (do
                                   (async/thread
-                                    (with-connection znode-events
+                                    (zclient/with-connection handle-connection-loss
                                       (async/>!! data-events (assoc (log/spy :trace (zclient/data client path
                                                                                                   {:watcher (partial async/put! znode-events)}))
                                                                     ::node this))))
                                   cze)
                :ChildWatchRemoved (do (log/debugf "Child watch on %s removed" (str this)) cze)
-               :NodeChildrenChanged (with-connection znode-events
+               :NodeChildrenChanged (zclient/with-connection handle-connection-loss
                                       (let [{:keys [stat paths]} (zclient/children client path {:watcher (partial async/put! znode-events)})
                                             [child-adds child-dels] (process-children-changes this children paths)]
                                         (when (or (seq child-adds) (seq child-dels))
@@ -220,9 +220,10 @@
                       cze) ; idempotent
               (async/>! ec {::type ::watch-stop}))))
       (async/>!! ec {::type ::watch-start})
-      (with-connection znode-events (when-let [stat (zclient/exists client path {:watcher (partial async/put! znode-events)})]
-                                      (async/>!! exists-events {::type ::exists ::stat stat})
-                                      (async/>!! znode-events {:event-type :NodeCreated})))
+      (zclient/with-connection handle-connection-loss
+        (when-let [stat (zclient/exists client path {:watcher (partial async/put! znode-events)})]
+          (async/>!! exists-events {::type ::exists ::stat stat})
+          (async/>!! znode-events {:event-type :NodeCreated})))
       znode-events))
   (compareVersionAndSet [this version value]
     (let [data [value (meta value)]
@@ -325,7 +326,7 @@
       (if-let [[event client] (async/<! client-events)]
         (recur (case event
                  ::zclient/connected (let [znode-events (watch root)]
-                                       (create root) ; root triggers blocking recursive actualization of tree
+                                       (zclient/with-connection (make-connection-loss-handler root znode-events) (create root))
                                        znode-events)
                  ::zclient/closed (when znode-events (async/close! znode-events)) ; failed connections start but don't connect before closing?
                  znode-events))
