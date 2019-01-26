@@ -162,7 +162,7 @@
           children-events (async/chan 5 (comp (map process-stat) (tap-to-atom stat ::stat)) handle-channel-error)
           exists-events (async/chan 1 (comp (map process-stat) (tap-to-atom stat ::stat)) handle-channel-error)
           handle-connection-loss (make-connection-loss-handler this znode-events)]
-      (async/pipe ec events)
+      (async/pipe ec events false)
       (async/pipe data-events ec true)
       (async/pipe delete-events ec true)
       (async/pipe children-events ec true)
