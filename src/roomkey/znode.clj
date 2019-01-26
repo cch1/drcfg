@@ -236,8 +236,7 @@
           stat' (zclient/set-data client path (*serialize* data) version {})]
       (when stat'
         (log/debugf "Set value for %s @ %s" (str this) version)
-        (reset! stat stat')
-        (async/put! events (process-stat {::type ::set! ::value value ::version version ::node this ::stat stat'})))
+        (reset! stat stat'))
       (boolean stat')))
 
   clojure.lang.Named
