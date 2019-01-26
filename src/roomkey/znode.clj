@@ -118,16 +118,27 @@
 
 (defn- make-connection-loss-handler
   "Return a handler for client connection loss that closes the node event channel"
-  [znode channel]
+  [znode wmgr]
   (fn [e type]
     (log/infof "Unrecoverable client error (%s) on %s, shutting down watch" type (str znode))
-    (async/close! channel)
+    (async/close! wmgr)
     nil))
 
 (defn- make-channel-error-handler
   [znode]
   (fn [e]
     (log/errorf e "Exception while processing channel event for %s") znode))
+
+(deftype WatchManager [input output]
+  impl/WritePort
+  (put! [port val fn1-handler] (impl/put! input val fn1-handler))
+
+  impl/ReadPort
+  (take! [this handler] (impl/take! output handler))
+
+  impl/Channel
+  (closed? [this] (impl/closed? input))
+  (close! [this] (impl/close! input)))
 
 (deftype ZNode [client path stat value children events]
   VirtualNode
@@ -158,7 +169,7 @@
           znode-events (async/chan 5 identity handle-channel-error)
           ec (async/chan 1 (map (fn tag [e] (assoc e ::node this))) handle-channel-error)
           data-events (async/chan (async/sliding-buffer 4) (zdata-xform stat value) handle-channel-error)
-          delete-events (async/chan 1 (dedupe) handle-channel-error)  ; why won't a promise channel work here?
+          delete-events (async/chan 1 (dedupe) handle-channel-error) ; why won't a promise channel work here?
           children-events (async/chan 5 (comp (map process-stat) (tap-to-atom stat ::stat)) handle-channel-error)
           exists-events (async/chan 1 (comp (map process-stat) (tap-to-atom stat ::stat)) handle-channel-error)
           handle-connection-loss (make-connection-loss-handler this znode-events)]
@@ -216,19 +227,19 @@
                                                                                 (assoc cze child (watch child))) cze child-adds)
                                                                       (reduce (fn [cze child]
                                                                                 (log/debugf "Processed remove for %s" (str child))
-                                                                                (async/close! (first (cze child)))
+                                                                                (async/close! (cze child))
                                                                                 (dissoc cze child)) cze child-dels)))
                                              (do (log/warnf "Unexpected znode event:state [%s:%s] while watching %s" event-type keeper-state (str this))
                                                  cze)))]
                             (recur cze)))
                         (do (log/debugf "The event channel for %s closed; shutting down" (str this))
                             (async/>! ec {::type ::watch-stop}) ; idempotent
-                            (reduce (fn [cze [child [c _ :as wmgr]]]
-                                      (async/close! c)
+                            (reduce (fn [cze [child wmgr]]
+                                      (async/close! wmgr)
                                       (dissoc cze child))
                                     cze
                                     cze))))]
-        [znode-events results])))
+        (->WatchManager znode-events results))))
   (compareVersionAndSet [this version value]
     (let [data [value (meta value)]
           stat' (zclient/set-data client path (*serialize* data) version {})]
@@ -325,15 +336,15 @@
 
 (defn- watch-client [root client]
   (let [client-events (async/tap client (async/chan 1))]
-    (async/go-loop [[znode-events results :as wmgr] [nil nil]] ; start event listener loop
+    (async/go-loop [wmgr nil]     ; start event listener loop
       (if-let [[event client] (async/<! client-events)]
         (recur (case event
-                 ::zclient/connected (let [[znode-events _ :as wmgr] (watch root)]
-                                       (zclient/with-connection (make-connection-loss-handler root znode-events) (create root))
+                 ::zclient/connected (let [wmgr (watch root)]
+                                       (zclient/with-connection (make-connection-loss-handler root wmgr) (create root))
                                        wmgr)
-                 ::zclient/closed (when znode-events (async/close! znode-events)) ; failed connections start but don't connect before closing?
+                 ::zclient/closed (when wmgr (async/close! wmgr)) ; failed connections start but don't connect before closing?
                  wmgr))
-        (do (log/infof "The client event channel for %s has closed, shutting down" (.path root)) results)))))
+        (do (log/infof "The client event channel for %s has closed, shutting down" (.path root)) wmgr)))))
 
 (defn create-root
   "Create a root znode and watch for client status changes to manage watches"
