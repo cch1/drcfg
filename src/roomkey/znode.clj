@@ -98,15 +98,15 @@
   ;; NB The implied node changes have already been persisted (created and deleted) -here we manage the proxy data and associated processing
   ;; TODO: https://tech.grammarly.com/blog/building-etl-pipelines-with-clojure
   [parent children paths]
-  (let [childs' (into #{} (comp (map (fn [segment] (as-> (str (.path parent) "/" segment) s
-                                                     (if (.startsWith s "//") (.substring s 1) s))))
+  (let [path-prefix (as-> (str (.path parent) "/") s (if (= s "//") "/" s))
+        childs' (into #{} (comp (map (fn [segment] (str path-prefix segment)))
                                 (map (fn [path] (default (.client parent) path)))) paths)]
     (dosync
      (let [childs @children
            child-adds (set/difference childs' childs)
            child-dels (set/difference childs childs')]
-       (doseq [child child-adds] (alter children conj child))
-       (doseq [child child-dels] (alter children disj child))
+       (apply alter children conj child-adds)
+       (apply alter children disj child-dels)
        [child-adds child-dels]))))
 
 ;; http://insideclojure.org/2016/03/16/collections/
