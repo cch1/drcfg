@@ -25,7 +25,7 @@
 
 (defn- deserialize-data
   "Process raw zdata into usefully deserialized types and structure"
-  [{node ::node :as zdata}]
+  [node zdata]
   (update zdata ::value (fn [ba] (try (*deserialize* ba)
                                       (catch java.lang.RuntimeException e
                                         (log/warnf "Unable to deserialize znode data [%s]" (str node))
@@ -52,13 +52,13 @@
        (rf result input)))))
 
 (defn- zdata-xform
-  [stat-atom value-atom]
+  [znode]
   (comp (map normalize-datum)
         (map process-stat)
-        (map deserialize-data)
+        (map (partial deserialize-data znode))
         (map decode-datum)
-        (tap-to-atom value-atom ::value)
-        (tap-to-atom stat-atom ::stat)))
+        (tap-to-atom (.value znode) ::value)
+        (tap-to-atom (.stat znode) ::stat)))
 
 ;;; A proxy for a znode in a zookeeper cluster.
 ;;; * While offline (before the client connects) or online, a local tree can be created:
@@ -168,7 +168,7 @@
     (let [handle-channel-error (make-channel-error-handler this)
           znode-events (async/chan 5 identity handle-channel-error)
           ec (async/chan 1 (map (fn tag [e] (assoc e ::node this))) handle-channel-error)
-          data-events (async/chan (async/sliding-buffer 4) (zdata-xform stat value) handle-channel-error)
+          data-events (async/chan (async/sliding-buffer 4) (zdata-xform this) handle-channel-error)
           delete-events (async/chan 1 (dedupe) handle-channel-error) ; why won't a promise channel work here?
           children-events (async/chan 5 (comp (map process-stat) (tap-to-atom stat ::stat)) handle-channel-error)
           exists-events (async/chan 1 (comp (map process-stat) (tap-to-atom stat ::stat)) handle-channel-error)
@@ -205,9 +205,8 @@
                                                          cze)
                                         :DataWatchRemoved (do (log/debugf "Data watch on %s removed" (str this)) cze)
                                         :NodeDataChanged (do
-                                                           (async/>!! data-events (assoc (log/spy :trace (zclient/data client path
-                                                                                                                       {:watcher (partial async/put! znode-events)}))
-                                                                                         ::node this))
+                                                           (async/>!! data-events (log/spy :trace (zclient/data client path
+                                                                                                                {:watcher (partial async/put! znode-events)})))
                                                            cze)
                                         :ChildWatchRemoved (do (log/debugf "Child watch on %s removed" (str this)) cze)
                                         :NodeChildrenChanged (let [{:keys [stat paths]} (zclient/children client path {:watcher (partial async/put! znode-events)})
