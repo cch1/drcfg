@@ -75,10 +75,10 @@
 (defprotocol BackedZNode
   "A Proxy for a ZooKeeper znode"
   (create [this] "Create the znode backing this virtual node")
-  (watch [this] "Recursively watch the ZooKeeper znode and its children, recording updates to data and children in the returned channel.
-  The channel can be closed to stop processing updates")
-  (compareVersionAndSet [this version value] "Update the znode with the given value asserting the current version")
-  (delete [this version] "Delete this znode, asserting the current version"))
+  (delete [this version] "Delete this znode, asserting the current version")
+  (watch [this] "Recursively watch the ZooKeeper znode and its children, returning a WatchManager.
+  The WatchManager can be closed to cease watching and read from to get the results of watching.")
+  (compareVersionAndSet [this version value] "Update the znode with the given value asserting the current version"))
 
 (defprotocol VirtualNode
   "A value-bearing node in a tree"
