@@ -186,7 +186,6 @@
                      (log/debugf "Event [%s:%s] for %s" event-type keeper-state (str this))
                      (when-let [cze (zclient/with-connection handle-connection-loss
                                       (case event-type
-                                        :None (do (assert (nil? (:path event)) "Keeper State event received with a path!") cze) ; should be handled by default watch on client
                                         :NodeCreated (do
                                                        (when keeper-state
                                                          (log/debugf "Node %s created" (str this))
@@ -203,12 +202,10 @@
                                                          (async/>! delete-events {::type ::deleted!})
                                                          (async/close! znode-events) ; shut down properly
                                                          cze)
-                                        :DataWatchRemoved (do (log/debugf "Data watch on %s removed" (str this)) cze)
                                         :NodeDataChanged (do
                                                            (async/>!! data-events (log/spy :trace (zclient/data client path
                                                                                                                 {:watcher (partial async/put! znode-events)})))
                                                            cze)
-                                        :ChildWatchRemoved (do (log/debugf "Child watch on %s removed" (str this)) cze)
                                         :NodeChildrenChanged (let [{:keys [stat paths]} (zclient/children client path {:watcher (partial async/put! znode-events)})
                                                                    [child-adds child-dels] (process-children-changes this children paths)]
                                                                (when (or (seq child-adds) (seq child-dels))
