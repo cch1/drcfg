@@ -179,6 +179,7 @@
                      (log/debugf "Event [%s:%s] for %s" event-type keeper-state (str this))
                      (when-let [cwms (zclient/with-connection handle-connection-loss
                                        (case event-type
+                                         :None cwms ; Disconnected and Expired keeper states are reported here
                                          :NodeCreated (do
                                                         (when keeper-state
                                                           (log/debugf "Node %s created" (str this))
