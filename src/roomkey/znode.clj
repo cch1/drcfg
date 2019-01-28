@@ -335,8 +335,7 @@
   ([abs-path] (create-root abs-path ::root))
   ([abs-path value] (create-root abs-path value (zclient/create)))
   ([abs-path value zclient]
-   (let [segments (seq (string/split abs-path #"/"))
-         events (async/chan (async/sliding-buffer 4))]
+   (let [events (async/chan (async/sliding-buffer 4))]
      (->ZNode zclient abs-path (atom {:version -1 :cversion -1 :aversion -1}) (atom value) (ref #{}) events))))
 
 (defn open
