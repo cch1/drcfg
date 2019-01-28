@@ -89,6 +89,8 @@
                                 (db-initialize! *connect-string* sandbox 5000)
                                 ?form)))])
 
+(fact "Can initialize a fresh database" true => true)
+
 (fact "can create a config value"
       (>- (next-path) "my-default-value" :validator string?) => (refers-to "my-default-value"))
 
