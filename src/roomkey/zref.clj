@@ -29,14 +29,9 @@
   (update! [this version value] "Update the znode backing this zref")
   (path [this] "Return the path of the backing ZNode"))
 
-(defprotocol VersionedUpdate
-  (compareVersionAndSet [this current-version new-value] "Set to new-value only when current-version is latest"))
-
-(defprotocol VersionedDeref
-  (vDeref [this] "Return referenced value and version"))
-
-(defprotocol VersionedWatch
-  "A protocol for adding versioned watchers using the same associative storage as \"classic\" watchers"
+(defprotocol VersionedReference
+  (compareVersionAndSet [this current-version new-value] "Set to new-value only when current-version is latest")
+  (vDeref [this] "Return referenced value and version")
   (vAddWatch [this k f] "Add versioned watcher that will be called with new value and version"))
 
 (def data-xform
@@ -48,7 +43,7 @@
   (path [this] (.path znode))
   (start [this]
     (let [data (async/pipe znode (async/chan 1 data-xform))]
-      (async/go-loop []    ; start event listener loop
+      (async/go-loop [] ; start event listener loop
         (if-let [[value' version' :as n] (async/<! data)]
           (do
             (log/debugf "Data element @ version %d received by %s" version' (str this))
@@ -74,13 +69,10 @@
   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
   ;; https://www.safaribooksonline.com/library/view/zookeeper/9781449361297/ch04.html
 
-  VersionedUpdate
+  VersionedReference
   (compareVersionAndSet [this current-version newval]
     (update! this current-version newval))
-  VersionedDeref
   (vDeref [this] @cache)
-
-  VersionedWatch
   (vAddWatch [this k f] (swap! watches assoc k f) this)
 
   clojure.lang.IMeta
