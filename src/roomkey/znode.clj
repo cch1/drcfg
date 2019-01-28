@@ -323,7 +323,7 @@
     (async/go-loop [wmgr nil] ; start event listener loop
       (if-let [[event client] (async/<! client-events)]
         (case event
-          ::zclient/connected (recur (watch root))
+          ::zclient/connected (recur (or wmgr (watch root))) ; At startup and following session expiration
           ::zclient/expired (do (async/close! wmgr) (recur nil))
           ::zclient/closed (do (when wmgr (async/close! wmgr)) wmgr) ; failed connections start but don't connect before closing?
           (recur wmgr))
