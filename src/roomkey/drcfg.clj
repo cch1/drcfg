@@ -17,16 +17,16 @@
   "Open a connection with `root` in `scope` to the ZooKeeper cluster defined by `hosts`"
   ([hosts] (open hosts *root*))
   ([hosts root] (open hosts root nil))
-  ([hosts root scope]
-   ;; avoid a race condition by having mux wired up before feeding in client events
+  ([hosts root scope] (open hosts root scope 8000))
+  ([hosts root scope timeout]
    (let [connect-string (string/join "/" (filter identity [hosts zk-prefix scope]))]
      (log/infof "Opening client [%s] connection to %s" root connect-string)
-     (znode/open root connect-string 16000))))
+     (znode/open root connect-string timeout))))
 
 (defn db-initialize!
   "Synchronously initialize a fresh drcfg database in `scope` at the ZooKeeper cluster identified by `connect-string`"
   ([connect-string] (db-initialize! connect-string nil))
-  ([connect-string scope] (db-initialize! connect-string scope 5000))
+  ([connect-string scope] (db-initialize! connect-string scope 8000))
   ([connect-string scope timeout]
    (let [drcfg-root (znode/create-root (str "/" zk-prefix))
          data (async/pipe drcfg-root
@@ -39,9 +39,9 @@
                                       (async/alt! data ([event] (case event
                                                                   :roomkey.znode/created! (do (log/infof "Database initialized") (recur))
                                                                   :roomkey.znode/datum true))
-                                                  (async/timeout 10000) ([_] (log/warnf "Timed out waiting for database initialization") false))))]
+                                                  (async/timeout (* 2 timeout)) ([_] (log/warnf "Timed out waiting for database initialization") false))))]
          (log/infof "Database ready at %s [%s]" connect-string (str root))
-         (Thread/sleep 500) ; let ZNode acquisition settle down solely to avoid innocuous "Lost connection while processing" errors.
+         (Thread/sleep (/ timeout 10)) ; let ZNode acquisition settle down solely to avoid innocuous "Lost connection while processing" errors.
          root)))))
 
 (defn >-
