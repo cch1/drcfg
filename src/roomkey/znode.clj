@@ -218,10 +218,10 @@
         (async/>!! ec {::type ::watch-start})
         (->WatchManager znode-events rc cwms))))
   (actualize [this wmgr]
-    (when-not (zclient/exists client path {:watcher (partial async/put! wmgr)})
-      (create this))
+    (when-not (zclient/exists client path {:watcher (partial async/put! wmgr)}) (create this))
     (doseq [[child cwmgr] (seq wmgr)] (actualize child cwmgr))
-    (async/>!! wmgr {:event-type ::Boot}))
+    (async/>!! wmgr {:event-type ::Boot})
+    wmgr)
   (compareVersionAndSet [this version value]
     (let [data [value (meta value)]
           stat' (zclient/set-data client path (*serialize* data) version {})]
@@ -321,7 +321,7 @@
     (async/go-loop [wmgr nil] ; start event listener loop
       (if-let [[event client] (async/<! client-events)]
         (case event
-          ::zclient/connected (recur (or wmgr (let [wmgr (watch root)] (actualize root wmgr) wmgr))) ; At startup and following session expiration
+          ::zclient/connected (recur (or wmgr (actualize root (watch root)))) ; At startup and following session expiration
           ::zclient/expired (do (async/close! wmgr) (recur nil))
           ::zclient/closed (do (when wmgr (async/close! wmgr)) wmgr) ; failed connections start but don't connect before closing?
           (recur wmgr))
