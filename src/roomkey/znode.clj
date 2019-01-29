@@ -169,7 +169,7 @@
     true)
   (watch [this]
     (log/debugf "Watching %s" (str this))
-    (let [handle-channel-error (fn [e] (log/errorf e "Exception while processing channel event for %s") (str this))
+    (let [handle-channel-error (fn [e] (log/errorf e "Exception while processing channel event for %s" (str this)))
           znode-events (async/chan 5 identity handle-channel-error)
           ec (async/chan 1 (map (fn tag [e] (assoc e ::node this))) handle-channel-error)
           data-events (async/chan (async/sliding-buffer 4) (zdata-xform this) handle-channel-error)
