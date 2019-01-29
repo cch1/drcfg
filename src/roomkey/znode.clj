@@ -41,27 +41,46 @@
                               (if (instance? clojure.lang.IMeta value) (with-meta value metadata) value)))
       zdata)))
 
-(defn- tap-to-atom
-  [a f]
-  (fn [rf]
-    (fn
-      ([] (rf))
-      ([result] (rf result))
-      ([result input]
-       (reset! a (f input))
-       (rf result input)))))
+(defn- tap-children
+  [node]
+  (let [stat-ref (.stat node)
+        children-ref (.children node)]
+    (fn [rf]
+      (fn
+        ([] (rf))
+        ([result] (rf result))
+        ([result {::keys [inserted removed stat] :as input}]
+         (dosync
+          (ref-set stat-ref stat)
+          (apply alter children-ref conj inserted)
+          (apply alter children-ref disj removed))
+         (rf result input))))))
 
-(defn- tap-to-children
-  [a]
-  (fn [rf]
-    (fn
-      ([] (rf))
-      ([result] (rf result))
-      ([result {::keys [inserted removed] :as input}]
-       (dosync
-        (apply alter a conj inserted)
-        (apply alter a disj removed))
-       (rf result input)))))
+(defn- tap-datum
+  [node]
+  (let [stat-ref (.stat node)
+        value-ref (.value node)]
+    (fn [rf]
+      (fn
+        ([] (rf))
+        ([result] (rf result))
+        ([result {::keys [value stat] :as input}]
+         (dosync
+          (ref-set stat-ref stat)
+          (ref-set value-ref  value))
+         (rf result input))))))
+
+(defn- tap-stat
+  [node]
+  (let [stat-ref (.stat node)]
+    (fn [rf]
+      (fn
+        ([] (rf))
+        ([result] (rf result))
+        ([result {::keys [stat] :as input}]
+         (dosync
+          (ref-set stat-ref stat))
+         (rf result input))))))
 
 (defn- zdata-xform
   [znode]
@@ -69,8 +88,7 @@
         (map process-stat)
         (map (partial deserialize-data znode))
         (map decode-datum)
-        (tap-to-atom (.value znode) ::value)
-        (tap-to-atom (.stat znode) ::stat)))
+        (tap-datum znode)))
 
 ;;; A proxy for a znode in a zookeeper cluster.
 ;;; * While offline (before the client connects) or online, a local tree can be created:
@@ -104,7 +122,7 @@
   ([client path] (default client path ::unknown))
   ([client path value]
    (let [events (async/chan (async/sliding-buffer 4))]
-     (->ZNode client path (atom {:version -1 :cversion -1 :aversion -1}) (atom value) (ref #{}) events))))
+     (->ZNode client path (ref {:version -1 :cversion -1 :aversion -1}) (ref value) (ref #{}) events))))
 
 (defn- process-children-changes
   "Atomically update the `children` reference from `parent` with the `paths` ensuring adds and deletes are processed exactly once"
@@ -151,7 +169,7 @@
   VirtualNode
   (overlay [this v]
     ;; This should be safe, but it is a (Clojure) code smell.  It could possibly be avoided through rewriting of the ZNode tree.
-    (swap! value (fn [old-v] (if (not= old-v v) (do (assert (= old-v ::placeholder) "Can't overwrite existing child") v) old-v)))
+    (dosync (alter value (fn [old-v] (if (not= old-v v) (do (assert (= old-v ::placeholder) "Can't overwrite existing child") v) old-v))))
     this)
   (update-or-create-child [this path v]
     (let [z' (default client path v)]
@@ -171,18 +189,16 @@
     (log/debugf "Watching %s" (str this))
     (let [handle-channel-error (fn [e] (log/errorf e "Exception while processing channel event for %s" (str this)))
           znode-events (async/chan 5 identity handle-channel-error)
-          ec (async/chan 1 (map (fn tag [e] (assoc e ::node this))) handle-channel-error)
           data-events (async/chan (async/sliding-buffer 4) (zdata-xform this) handle-channel-error)
           delete-events (async/chan 1 (dedupe) handle-channel-error) ; why won't a promise channel work here?
-          children-events (async/chan 5 (comp (map process-stat) (tap-to-atom stat ::stat) (tap-to-children children)) handle-channel-error)
-          exists-events (async/chan 1 (comp (map process-stat) (tap-to-atom stat ::stat)) handle-channel-error)
+          children-events (async/chan 5 (comp (map process-stat) (tap-children this)) handle-channel-error)
+          exists-events (async/chan 1 (comp (map process-stat) (tap-stat this)) handle-channel-error)
           handle-connection-loss (make-connection-loss-handler this znode-events)
           watcher (partial async/put! znode-events)]
-      (async/pipe ec events false)
-      (async/pipe data-events ec true)
-      (async/pipe delete-events ec true)
-      (async/pipe children-events ec true)
-      (async/pipe exists-events ec true)
+      (async/pipe data-events events false)
+      (async/pipe delete-events events false)
+      (async/pipe children-events events false)
+      (async/pipe exists-events events false)
       ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
       ;; https://www.safaribooksonline.com/library/view/zookeeper/9781449361297/ch04.html
       (let [cwms (reduce (fn [cwms child] (assoc cwms child (watch child))) {} @children)
@@ -196,7 +212,7 @@
                                          ::Boot (do (async/>! znode-events {:event-type :NodeDataChanged})
                                                     (async/>! znode-events {:event-type :NodeChildrenChanged})
                                                     cwms)
-                                         :NodeCreated (do (async/>! ec {::type ::created! ::value @value})
+                                         :NodeCreated (do (async/>! events {::type ::created!})
                                                           cwms)
                                          :NodeDeleted (do (async/>! delete-events {::type ::deleted!}) ; Generated by exists, data & child watches.
                                                           cwms)
@@ -223,13 +239,13 @@
                                              cwms)))]
                        (recur cwms)))
                    (do (log/debugf "The event channel for %s closed; shutting down" (str this))
-                       (async/>! ec {::type ::watch-stop}) ; idempotent
+                       (async/>! events {::type ::watch-stop}) ; idempotent
                        (reduce (fn [cwms [child wmgr]] (async/close! wmgr) (dissoc cwms child)) cwms cwms))))]
-        (async/>!! ec {::type ::watch-start})
+        (async/>!! events {::type ::watch-start})
         (->WatchManager znode-events rc cwms))))
   (actualize [this wmgr]
-    (if-let [s (zclient/exists client path {:watcher (partial async/put! wmgr)})]
-      (reset! stat s)
+    (if-let [stat' (zclient/exists client path {:watcher (partial async/put! wmgr)})]
+      (dosync (ref-set stat stat'))
       (create this))
     (doseq [[child cwmgr] (seq wmgr)] (actualize child cwmgr))
     (async/>!! wmgr {:event-type ::Boot})
@@ -239,7 +255,7 @@
           stat' (zclient/set-data client path (*serialize* data) version {})]
       (when stat'
         (log/debugf "Set value for %s @ %s" (str this) version)
-        (reset! stat stat'))
+        (dosync (ref-set stat stat')))
       (boolean stat')))
 
   clojure.lang.Named
@@ -346,7 +362,7 @@
   ([abs-path value] (create-root abs-path value (zclient/create)))
   ([abs-path value zclient]
    (let [events (async/chan (async/sliding-buffer 4))]
-     (->ZNode zclient abs-path (atom {:version -1 :cversion -1 :aversion -1}) (atom value) (ref #{}) events))))
+     (->ZNode zclient abs-path (ref {:version -1 :cversion -1 :aversion -1}) (ref value) (ref #{}) events))))
 
 (defn open
   "Open a ZooKeeper client connection and watch for client status changes to manage watches on `znode`"
