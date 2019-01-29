@@ -218,7 +218,9 @@
         (async/>!! ec {::type ::watch-start})
         (->WatchManager znode-events rc cwms))))
   (actualize [this wmgr]
-    (when-not (zclient/exists client path {:watcher (partial async/put! wmgr)}) (create this))
+    (if-let [s (zclient/exists client path {:watcher (partial async/put! wmgr)})]
+      (reset! stat s)
+      (create this))
     (doseq [[child cwmgr] (seq wmgr)] (actualize child cwmgr))
     (async/>!! wmgr {:event-type ::Boot})
     wmgr)
