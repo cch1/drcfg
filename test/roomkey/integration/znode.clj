@@ -43,6 +43,10 @@
   (every-checker (chatty-checker [actual] (extended-= actual expected-value))
                  (chatty-checker [actual] (extended-= (meta actual) expected-metadata))))
 
+(defchecker has-ref-state [expected-value]
+  (let [builder (fn [actual] [(deref (.stat actual)) (deref (.value actual)) (deref (.children actual))])]
+    (chatty-checker [actual] (extended-= (builder actual) (just expected-value)))))
+
 (background (around :facts (with-open [c (zoo/connect connect-string)]
                              (zoo/delete-all c sandbox)
                              ?form)))
@@ -54,7 +58,7 @@
           $child => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start}
                                                       (just #::znode{:type ::znode/created!})
                                                       (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})])))
-        $child))
+        $child => (has-ref-state [(stat? {:version 0}) 0 empty?])))
 
 (fact "Actualized ZNodes can be updated"
       (let [$root (create-root)
@@ -64,7 +68,8 @@
                                                       (just #::znode{:type ::znode/created!})
                                                       (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})]))
           (compare-version-and-set! $child 0 1)
-          $child => (eventually-streams 1 5000 (just [(just #::znode{:type ::znode/datum :value 1 :stat (stat? {:version 1})})])))))
+          $child => (eventually-streams 1 5000 (just [(just #::znode{:type ::znode/datum :value 1 :stat (stat? {:version 1})})])))
+        $child => (has-ref-state [(stat? {:version 1}) 1 empty?])))
 
 (fact "Existing ZNodes are acquired and stream their current value"
       (let [$root (create-root)
@@ -97,7 +102,8 @@
               $grandchild => (partial instance? roomkey.znode.ZNode)
               $grandchild => (eventually-streams 2 3000 (just [#::znode{:type ::znode/watch-start}
                                                                (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})]))
-              $child => (eventually-streams 1 1000 ::timeout))))))
+              $child => (eventually-streams 1 1000 ::timeout))
+            $root => (has-ref-state [(stat? {:version 0}) anything (just #{$child})])))))
 
 (fact "Existing ZNodes stream current value at startup when version greater than zero even when values match"
       (let [$root (create-root)
@@ -157,7 +163,8 @@
         (with-connection $root1 (str connect-string sandbox) 500
           $child1 => (eventually-streams 2 2000 (just [#::znode{:type ::znode/watch-start}
                                                        (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})]))
-          $child1 => (eventually-streams 1 2000 ::timeout))))
+          $child1 => (eventually-streams 1 2000 ::timeout)
+          $root1 => (has-ref-state [(stat? {:version 0}) anything (just #{$child1})]))))
 
 (fact "Root node behaves like leaves"
       (let [$root (create-root "/" 10)]
@@ -180,7 +187,8 @@
                                                       (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})]))
           (delete $child 0) => truthy
           $child => (eventually-streams 2 3000 (just #{#::znode{:type ::znode/deleted!}
-                                                       #::znode{:type ::znode/watch-stop}})))))
+                                                       #::znode{:type ::znode/watch-stop}})))
+        $root => (has-ref-state [(stat? {:cversion 2}) anything empty?])))
 
 (fact "Existing ZNodes can be deleted"
       (let [$root (create-root)
