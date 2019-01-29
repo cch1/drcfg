@@ -1,10 +1,13 @@
 ## Consolidate metadata into existing ZNode
- * It's a pain in the ass to have to create both nodes (X and X.metadata).  A tuple of [value, value-metadata, zref-metadata] would solve the problem nicely at the expense of needing a migration.
- * Scrap extra scope (just prefix w/ "drcfg", and make that a configurable default)
- * Support async calls to zookeeper lib
+It's a pain in the ass to have to create both nodes (X and X.metadata).  A tuple of [value, value-metadata, zref-metadata] would solve the problem nicely at the expense of needing a migration.
 
-## Allow zref metadata to be specified in the standard Clojure `def` fashion
-Existing approach (trailing varargs) is incompatible... so can't be gradually deprecated.
+## Scrap extra scope (just prefix w/ "drcfg", and make that a configurable default)
+
+## Support async calls to zookeeper lib
 
 ## Move reporting to separate namespace
  * Use this to get used zrefs: echo wchp | nc 127.0.0.1 2181 | grep drcfg | sort
+
+## Call `removeAllWatches` on ZNode shutdown once server is on version > 3.5.0
+
+## Call `create` on ZNode to return Stat structure once server is on version > 3.5.0
