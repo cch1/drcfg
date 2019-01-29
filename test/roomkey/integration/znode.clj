@@ -237,3 +237,20 @@
                                                      (contains #::znode{:type ::znode/datum :value (having-metadata [] nil)})]))
             (zoo/set-data c "/myzref0" (znode/*serialize* [["B"] {:my 1}]) 0)
             $z0 => (eventually-streams 1 3000 (just [(contains #::znode{:type ::znode/datum :value (having-metadata ["B"] {:my 1})})]))))))
+
+(fact "Children are remembered across sessions"
+      (let [$root (create-root)]
+        (with-open [c (zoo/connect (str connect-string sandbox))]
+          (with-connection $root (str connect-string sandbox) 500
+            $root => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start}
+                                                       (just #::znode{:type ::znode/created!})
+                                                       (contains #::znode{:type ::znode/datum})]))
+            (zoo/create c "/child" :data (znode/*serialize* [["B"] {:my 1}]))
+            (Thread/sleep 200))
+          $root => (eventually-streams 2 3000 (just [(contains #::znode{:type ::znode/children-changed})
+                                                     #::znode{:type ::znode/watch-stop}]))
+          (with-connection $root (str connect-string sandbox) 500
+            $root => (eventually-streams 2 3000 (just [#::znode{:type ::znode/watch-start}
+                                                       (contains #::znode{:type ::znode/datum})]))
+            (Thread/sleep 200))
+          $root => (eventually-streams 1 3000 (just [(contains #::znode{:type ::znode/watch-stop})])))))
