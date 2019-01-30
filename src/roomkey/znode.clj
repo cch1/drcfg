@@ -238,9 +238,11 @@
                                          (do (log/warnf "Unexpected znode event:state [%s:%s] while watching %s" event-type keeper-state (str this))
                                              cwms)))]
                        (recur cwms)))
-                   (do (log/debugf "The event channel for %s closed; shutting down" (str this))
-                       (async/>! events {::type ::watch-stop}) ; idempotent
-                       (reduce (fn [cwms [child wmgr]] (async/close! wmgr) (dissoc cwms child)) cwms cwms))))]
+                   (do (async/>! events {::type ::watch-stop})
+                       (doseq [wmgr (vals cwms)] (async/close! wmgr))
+                       (let [n (async/<! (async/transduce identity + 1 (async/merge (vals cwms))))]
+                         (log/debugf "The event channel closed with %d nodes seen; shutting down %s" n (str this))
+                         n))))]
         (async/>!! events {::type ::watch-start})
         (->WatchManager znode-events rc cwms))))
   (actualize [this wmgr]
@@ -351,9 +353,10 @@
         (case event
           ::zclient/connected (recur (or wmgr (actualize root (watch root)))) ; At startup and following session expiration
           ::zclient/expired (do (async/close! wmgr) (recur nil))
-          ::zclient/closed (do (when wmgr (async/close! wmgr)) wmgr) ; failed connections start but don't connect before closing?
+          ::zclient/closed (when wmgr (async/close! wmgr) (async/<!! wmgr)) ; failed connections start but don't connect before closing?
           (recur wmgr))
-        (do (log/infof "The client event channel for %s has closed, shutting down" (str root)) wmgr)))))
+        (do (log/infof "The client event channel for %s has closed, shutting down" (str root))
+            (if wmgr (async/<!! wmgr) 0))))))
 
 (defn create-root
   "Create a root znode"
