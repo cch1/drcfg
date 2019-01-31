@@ -163,3 +163,14 @@
         ($root "/a/b/c") => $child
         ($root "/a/dddb/c") => nil?
         (apply $root ["/a/b"]) => (partial instance? roomkey.znode.ZNode)))
+
+(for-all
+ [int gen/int]
+ {:num-tests 5000}
+ (fact "ZNodes have two kinds of \"consistent\" signatures" ; which are hopefully stable across many useful instances of the Clojure runtime
+       (let [$root (create-root)]
+         (add-descendant $root "/a" "a")
+         (add-descendant $root "/a/b0" "b0")
+         (add-descendant $root "/a/b1" "b1")
+         (let [s (signature $root)]
+           (signature $root) => s))))

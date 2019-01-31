@@ -254,3 +254,24 @@
                                                        (contains #::znode{:type ::znode/datum})]))
             (Thread/sleep 200))
           $root => (eventually-streams 1 3000 (just [(contains #::znode{:type ::znode/watch-stop})])))))
+
+(fact "Signature can be computed"
+      (let [$root (create-root)
+            $child0 (add-descendant $root "/child0" 0)
+            $child1 (add-descendant $root "/child1" (with-meta #{1 2 3} {:foo "bar"}))
+            $grandchild (add-descendant $root "/child0/grandchild" 0)]
+        (with-connection $root (str connect-string sandbox) 500
+          $root => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start}
+                                                     (just #::znode{:type ::znode/created!})
+                                                     (contains #::znode{:type ::znode/datum :value ::znode/root})]))
+          $child0 => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start}
+                                                       (just #::znode{:type ::znode/created!})
+                                                       (contains #::znode{:type ::znode/datum :value 0})]))
+          $child1 => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start}
+                                                       (just #::znode{:type ::znode/created!})
+                                                       (contains #::znode{:type ::znode/datum :value #{1 2 3}})]))
+          $grandchild => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start}
+                                                           (just #::znode{:type ::znode/created!})
+                                                           (contains #::znode{:type ::znode/datum :value 0})]))
+          (signature $grandchild) => (just [integer? -1249580007])
+          (signature $root) => (just [integer? -1188681409]))))

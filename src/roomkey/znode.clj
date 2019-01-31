@@ -109,7 +109,8 @@
   (watch [this] "Recursively watch the znode and its children, returning a WatchManager that can be closed to cease watching, read from to
  get the results of watching and, as seq'd, to obtain the WatchManagers of its children")
   (actualize [this wmgr] "Recursively persist this ZNode, informing the watch manager of relevant events")
-  (compareVersionAndSet [this version value] "Update the znode with the given value asserting the current version"))
+  (compareVersionAndSet [this version value] "Update the znode with the given value asserting the current version")
+  (signature [this] "Return a (Clojure) hash equivalent to a signature of the state of the subtree at this ZNode"))
 
 (defprotocol VirtualNode
   "A value-bearing node in a tree"
@@ -261,6 +262,16 @@
         (log/debugf "Set value for %s @ %s" (str this) version)
         (dosync (ref-set stat stat')))
       (boolean stat')))
+  (signature [this] (dosync
+                     (transduce (map signature)
+                                (fn accumulate-independently-then-hash
+                                  ([] [[nil #{}] [nil #{}]])
+                                  ([acc] (mapv hash acc))
+                                  ([acc child-hash] (-> acc
+                                                        (update-in [0 1] conj (child-hash 0))
+                                                        (update-in [1 1] conj (child-hash 1)))))
+                                [[@stat #{}] [@value #{}]]
+                                @children)))
 
   clojure.lang.Named
   (getName [this] (let [segments (string/split path #"/")] (or (last segments) "")))
