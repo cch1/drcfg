@@ -15,13 +15,15 @@
 
 (defn- normalize-datum [{:keys [stat data]}] {::type ::datum ::value data ::stat stat})
 
-(defn- process-stat
+(defn- process-stat*
   "Process stat structure into useful data"
-  [zdata]
-  (-> zdata
-      ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_timeInZk
-      (update-in [::stat :ctime] #(Instant/ofEpochMilli %))
-      (update-in [::stat :mtime] #(Instant/ofEpochMilli %))))
+  ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_timeInZk
+  [stat]
+  (-> stat
+      (update :ctime #(Instant/ofEpochMilli %))
+      (update :mtime #(Instant/ofEpochMilli %))))
+
+(defn- process-stat [zdata] (update zdata ::stat process-stat*))
 
 (defn- deserialize-data
   "Process raw zdata into usefully deserialized types and structure"
@@ -250,7 +252,7 @@
         (->WatchManager znode-events rc cwms))))
   (actualize [this wmgr]
     (if-let [stat' (zclient/exists client path {:watcher (partial async/put! wmgr)})]
-      (dosync (ref-set stat stat'))
+      (dosync (ref-set stat (process-stat* stat')))
       (create this))
     (doseq [[child cwmgr] (seq wmgr)] (actualize child cwmgr))
     (async/>!! wmgr {:event-type ::Boot})
@@ -260,7 +262,7 @@
           stat' (zclient/set-data client path (*serialize* data) version {})]
       (when stat'
         (log/debugf "Set value for %s @ %s" (str this) version)
-        (dosync (ref-set stat stat')))
+        (dosync (ref-set stat (process-stat* stat'))))
       (boolean stat')))
   (signature [this] (dosync
                      (transduce (map signature)
