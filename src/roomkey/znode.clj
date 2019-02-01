@@ -49,7 +49,7 @@
       (fn
         ([] (rf))
         ([result] (rf result))
-        ([result {::keys [inserted removed stat] :as input}]
+        ([result {:keys [roomkey.znode/inserted roomkey.znode/removed roomkey.znode/stat] :as input}]
          (dosync
           (ref-set stat-ref stat)
           (apply alter children-ref conj inserted)
@@ -64,7 +64,7 @@
       (fn
         ([] (rf))
         ([result] (rf result))
-        ([result {::keys [value stat] :as input}]
+        ([result {:keys [roomkey.znode/value roomkey.znode/stat] :as input}]
          (dosync
           (ref-set stat-ref stat)
           (ref-set value-ref  value))
@@ -77,7 +77,7 @@
       (fn
         ([] (rf))
         ([result] (rf result))
-        ([result {::keys [stat] :as input}]
+        ([result {:keys [roomkey.znode/stat] :as input}]
          (dosync
           (ref-set stat-ref stat))
          (rf result input))))))
@@ -174,7 +174,7 @@
     this)
   (update-or-create-child [this path v]
     (let [z' (default client path v)]
-      (get (conj! this z') z')))
+      (.get (conj! this z') z')))
 
   BackedZNode
   (create [this] ; Synchronously create the node @ version zero, if not already present

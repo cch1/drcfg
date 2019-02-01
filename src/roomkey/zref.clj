@@ -36,7 +36,7 @@
 
 (def data-xform
   (comp (filter (comp #{:roomkey.znode/datum} :roomkey.znode/type))
-        (map (fn [{::znode/keys [value stat]}] (with-meta [value (:version stat)] stat)))))
+        (map (fn [{:keys [roomkey.znode/value roomkey.znode/stat]}] (with-meta [value (:version stat)] stat)))))
 
 (deftype ZRef [znode cache validator watches]
   ZNodeWatching
