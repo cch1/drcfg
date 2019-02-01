@@ -354,7 +354,7 @@
   (if-let [[_ head tail] (re-matches #"(/[^/]+)(.*)" path)]
     (let [abs-path (as-> (str (.path parent) head) s
                      (if (.startsWith s "//") (.substring s 1) s))]
-      (if (seq tail)
+      (if-not (empty? tail)
         (recur (update-or-create-child parent abs-path ::placeholder) tail value)
         (update-or-create-child parent abs-path value)))
     parent))
