@@ -297,6 +297,9 @@
   (get [this v] ; This is used by `core/get` when ILookup is not implemented
     (get @children v))
 
+  java.lang.Comparable
+  (compareTo [this other-znode] (.compareTo path (.path other-znode)))
+
   clojure.lang.IFn
   (invoke [this p] (if-let [[_ head tail] (re-matches #"(/[^/]+)(.*)" p)]
                      (let [abs-path (as-> (str path head) s

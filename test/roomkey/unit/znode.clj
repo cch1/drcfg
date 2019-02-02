@@ -174,3 +174,16 @@
          (add-descendant $root "/a/b1" "b1")
          (let [s (signature $root)]
            (signature $root) => s))))
+
+(for-all
+ [int gen/int]
+ {:num-tests 50}
+ (fact "ZNodes are comparable"
+       (let [$root (create-root)
+             $child0 (add-descendant $root "/child0" 0)
+             $child1 (add-descendant $root "/child1" (with-meta #{1 2 3} {:foo "bar"}))
+             $grandchild (add-descendant $root "/child0/grandchild" 0)]
+         (compare $child0 $child1) => neg?
+         (compare $child1 $child0) => pos?
+         (compare $child0 $child0) => zero?
+         (sort (shuffle [$root $child0 $grandchild $child1])) => (just [$root $child0 $grandchild $child1]))))
