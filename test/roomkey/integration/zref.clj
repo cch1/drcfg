@@ -59,13 +59,13 @@
     (str "/" (swap! counter inc))))
 
 (fact "A ZRef reflects the persisted version of the initial default value upon actualization"
-      (let [$root (znode/create-root)
+      (let [$root (znode/new-root)
             $z (create $root "/myzref" "A")]
         (with-awaited-connection $root
           $z => (eventually-vrefers-to 2000 ["A" 0]))))
 
 (fact "Can update a connected ZRef"
-      (let [$root (znode/create-root)
+      (let [$root (znode/new-root)
             $z0 (create $root "/zref0" "A")
             $z1 (zref $root "/zref1" "A")
             $z2 (zref $root "/zref2" 1)]
@@ -89,7 +89,7 @@
           $z2 => (eventually-vrefers-to 1000 [3 2]))))
 
 (fact "A connected ZRef is updated by changes at the cluster"
-      (let [$root (znode/create-root)
+      (let [$root (znode/new-root)
             $z (zref $root "/myzref" "A")]
         (with-awaited-connection $root
           (let [c (zoo/connect (str connect-string sandbox))]
@@ -98,7 +98,7 @@
             $z => (eventually-vrefers-to 1000 ["B" 1])))))
 
 (fact "A connected ZRef's watches are called when updated by changes at the cluster"
-      (let [$root (znode/create-root)
+      (let [$root (znode/new-root)
             $z (zref $root "/myzref" "A")
             sync (promise)]
         (with-open [c (zoo/connect (str connect-string sandbox))]
@@ -110,7 +110,7 @@
             (deref sync 10000 :promise-never-delivered) => (just [:sync (partial instance? roomkey.zref.ZRef) "A" "B"])))))
 
 (fact "A connected ZRef is not updated by invalid values at the cluster"
-      (let [$root (znode/create-root)
+      (let [$root (znode/new-root)
             $z (zref $root "/myzref" "A" :validator string?)
             sync (promise)]
         (with-open [c (zoo/connect (str connect-string sandbox))]
@@ -123,7 +123,7 @@
             $z => (eventually-vrefers-to 1000 ["B" 2])))))
 
 (fact "Children do not intefere with their parents"
-      (let [$root (znode/create-root)
+      (let [$root (znode/new-root)
             $zB (create $root "/myzref/child" "B" :validator string?)
             $zA (create $root "/myzref" "A" :validator string?)
             sync-a (promise)
@@ -142,7 +142,7 @@
             $zB => (eventually-refers-to 1000 "b")))))
 
 (fact "A ZRef deleted at the cluster throws exceptions on update but otherwise behaves"
-      (let [$root (znode/create-root)
+      (let [$root (znode/new-root)
             $z (zref $root "/myzref" "A")
             sync (promise)]
         (with-open [c (zoo/connect (str connect-string sandbox))]

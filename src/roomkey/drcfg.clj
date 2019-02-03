@@ -9,7 +9,7 @@
 
 ;;; USAGE:  see /roomkey/README.md
 
-(def ^:dynamic *root* (znode/create-root))
+(def ^:dynamic *root* (znode/new-root))
 
 (def zk-prefix "drcfg")
 
@@ -28,7 +28,7 @@
   ([connect-string] (db-initialize! connect-string nil))
   ([connect-string scope] (db-initialize! connect-string scope 8000))
   ([connect-string scope timeout]
-   (let [drcfg-root (znode/create-root (str "/" zk-prefix))
+   (let [drcfg-root (znode/new-root (str "/" zk-prefix))
          data (async/pipe drcfg-root
                           (async/chan 1 (comp (filter (comp #{:roomkey.znode/datum :roomkey.znode/created!} :roomkey.znode/type))
                                               (map :roomkey.znode/type)))

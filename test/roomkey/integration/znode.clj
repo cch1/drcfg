@@ -52,7 +52,7 @@
                              ?form)))
 
 (fact "ZNodes can be actualized and stream current value"
-      (let [$root (create-root)
+      (let [$root (new-root)
             $child (add-descendant $root "/child" 0)]
         (with-connection $root (str connect-string sandbox) 500
           $child => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start}
@@ -61,7 +61,7 @@
         $child => (has-ref-state [(stat? {:version 0}) 0 empty?])))
 
 (fact "Actualized ZNodes can be updated"
-      (let [$root (create-root)
+      (let [$root (new-root)
             $child (add-descendant $root "/child" 0)]
         (with-connection $root (str connect-string sandbox) 500
           $child => (eventually-streams 3 5000 (just [#::znode{:type ::znode/watch-start}
@@ -73,7 +73,7 @@
         $child => (has-ref-state [(stat? {:version 1}) 1 empty?])))
 
 (fact "Existing ZNodes are acquired and stream their current value"
-      (let [$root (create-root)
+      (let [$root (new-root)
             $child (add-descendant $root "/child" 0)
             $grandchild (add-descendant $root "/child/grandchild" 0)]
         (with-connection $root (str connect-string sandbox) 500
@@ -85,7 +85,7 @@
                                                            (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})])))
         $child => (eventually-streams 1 2000 (just [#::znode{:type ::znode/watch-stop}])))
       ;; ensure spurious wrongly-pathed acquired children don't appear
-      (let [$root (create-root)]
+      (let [$root (new-root)]
         (with-connection $root (str connect-string sandbox) 500
           $root => (eventually-streams 1 3000 (just [#::znode{:type ::znode/watch-start}]))
           $root => (eventually-streams 2 3000 (just #{(just #::znode{:type ::znode/datum :value ::znode/root :stat (stat? {:version 0})})
@@ -107,7 +107,7 @@
             $root => (has-ref-state [(stat? {:version 0}) anything (just #{$child})])))))
 
 (fact "Existing ZNodes stream current value at startup when version greater than zero even when values match"
-      (let [$root (create-root)
+      (let [$root (new-root)
             $child (add-descendant $root "/child" 0)]
         (with-connection $root (str connect-string sandbox) 500
           $child => (eventually-streams 3 2000 (just [#::znode{:type ::znode/watch-start}
@@ -116,29 +116,29 @@
           (compare-version-and-set! $child 0 1)
           $child => (eventually-streams 1 2000 (just [(just #::znode{:type ::znode/datum :value 1 :stat (stat? {:version 1})})]))))
 
-      (let [$root (create-root)
+      (let [$root (new-root)
             $child (add-descendant $root "/child" 1)]
         (with-connection $root (str connect-string sandbox) 500
           $child => (eventually-streams 2 2000 (just [#::znode{:type ::znode/watch-start}
                                                       (just #::znode{:type ::znode/datum :value 1 :stat (stat? {:version 1})})])))))
 
 (fact "Existing ZNodes even stream version zero value at startup when different from initial value"
-      (let [$root (create-root)
+      (let [$root (new-root)
             $child (add-descendant $root "/child" 0)]
         (with-connection $root (str connect-string sandbox) 500
           $child => (eventually-streams 3 2000 (just [#::znode{:type ::znode/watch-start}
                                                       (just #::znode{:type ::znode/created!})
                                                       (just #::znode{:type ::znode/datum :value 0 ::znode/stat (stat? {:version 0})})]))))
-      (let [$root (create-root)
+      (let [$root (new-root)
             $child (add-descendant $root "/child" 1)]
         (with-connection $root (str connect-string sandbox) 500
           $child => (eventually-streams 2 2000 (just [#::znode{:type ::znode/watch-start}
                                                       (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})])))))
 
 (fact "ZNodes stream pushed values"
-      (let [$root0 (create-root)
+      (let [$root0 (new-root)
             $child0 (add-descendant $root0 "/child" 0)
-            $root1 (create-root)
+            $root1 (new-root)
             $child1 (add-descendant $root1 "/child" 0)]
         (with-connection $root0 (str connect-string sandbox) 500
           $child0 => (eventually-streams 3 2000 (just [#::znode{:type ::znode/watch-start}
@@ -152,9 +152,9 @@
             $child1 => (eventually-streams 1 2000 (just [(just #::znode{:type ::znode/datum :value 1 :stat (stat? {:version 1})})]))))))
 
 (fact "Existing ZNodes stream pushed values exactly once"
-      (let [$root0 (create-root)
+      (let [$root0 (new-root)
             $child0 (add-descendant $root0 "/child" 0)
-            $root1 (create-root)
+            $root1 (new-root)
             $child1 (add-descendant $root1 "/child" 0)]
         (with-connection $root0 (str connect-string sandbox) 500
           $child0 => (eventually-streams 3 2000 (just [#::znode{:type ::znode/watch-start}
@@ -168,31 +168,31 @@
           $root1 => (has-ref-state [(stat? {:version 0}) anything (just #{$child1})]))))
 
 (fact "Root node behaves like leaves"
-      (let [$root (create-root "/" 10)]
+      (let [$root (new-root "/" 10)]
         (with-connection $root (str connect-string sandbox) 500
           $root => (eventually-streams 3 2000 (just [#::znode{:type ::znode/watch-start}
                                                      (just #::znode{:type ::znode/created!})
                                                      (just #::znode{:type ::znode/datum :value 10 :stat (stat? {:version 0})})]))))
 
-      (let [$root (create-root "/" nil)]
+      (let [$root (new-root "/" nil)]
         (with-connection $root (str connect-string sandbox) 500
           $root => (eventually-streams 2 2000 (just [#::znode{:type ::znode/watch-start}
                                                      (just #::znode{:type ::znode/datum :value 10 :stat (stat? {:version 0})})])))))
 
 (fact "ZNodes can be deleted"
-      (let [$root (create-root)
+      (let [$root (new-root)
             $child (add-descendant $root "/child" 0)]
         (with-connection $root (str connect-string sandbox) 500
           $child => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start}
                                                       (just #::znode{:type ::znode/created!})
                                                       (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})]))
-          (delete $child 0) => truthy
+          (delete! $child 0) => truthy
           $child => (eventually-streams 2 3000 (just #{#::znode{:type ::znode/deleted!}
                                                        #::znode{:type ::znode/watch-stop}})))
         $root => (has-ref-state [(stat? {:cversion 2}) anything empty?])))
 
 (fact "Existing ZNodes can be deleted"
-      (let [$root (create-root)
+      (let [$root (new-root)
             $child (add-descendant $root "/child" 0)]
         (with-connection $root (str connect-string sandbox) 500
           $child => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start}
@@ -202,12 +202,12 @@
         (with-connection $root (str connect-string sandbox) 500
           $child => (eventually-streams 2 3000 (just [#::znode{:type ::znode/watch-start}
                                                       (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})]))
-          (delete $child 0) => truthy
+          (delete! $child 0) => truthy
           $child => (eventually-streams 2 3000 (just #{#::znode{:type ::znode/deleted!}
                                                        #::znode{:type ::znode/watch-stop}})))))
 
 (fact "Children do not intefere with their parents, regardless of insertion sequence"
-      (let [$root (create-root)
+      (let [$root (new-root)
             $zB (add-descendant $root "/myzref/child" "B")
             $zA (add-descendant $root "/myzref" "A")]
         (with-connection $root (str connect-string sandbox) 500
@@ -221,7 +221,7 @@
         $zB => (eventually-streams 1 2000 (just [#::znode{:type ::znode/watch-stop}]))))
 
 (fact "A ZNode can persist metadata"
-      (let [$root (create-root)
+      (let [$root (new-root)
             $z0 (add-descendant $root "/myzref0" "A")
             $z1 (add-descendant $root "/myzref1" (with-meta {:my "znode" } {:foo 1}))
             $z2 (add-descendant $root "/myzref2" [])]
@@ -240,7 +240,7 @@
             $z0 => (eventually-streams 1 3000 (just [(contains #::znode{:type ::znode/datum :value (having-metadata ["B"] {:my 1})})]))))))
 
 (fact "Children are remembered across sessions"
-      (let [$root (create-root)]
+      (let [$root (new-root)]
         (with-open [c (zoo/connect (str connect-string sandbox))]
           (with-connection $root (str connect-string sandbox) 500
             $root => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start}
@@ -257,7 +257,7 @@
           $root => (eventually-streams 1 3000 (just [(contains #::znode{:type ::znode/watch-stop})])))))
 
 (fact "Signature can be computed"
-      (let [$root (create-root)
+      (let [$root (new-root)
             $child0 (add-descendant $root "/child0" 0)
             $child1 (add-descendant $root "/child1" (with-meta #{1 2 3} {:foo "bar"}))
             $grandchild (add-descendant $root "/child0/grandchild" 0)]
@@ -278,7 +278,7 @@
           (signature $root) => (just [integer? -1188681409]))))
 
 (fact "Added descendant ZNodes can be created and will merge into watched tree"
-      (let [$root (create-root)
+      (let [$root (new-root)
             $child (add-descendant $root "/child" 0)]
         (with-connection $root (str connect-string sandbox) 500
           $root => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start}
@@ -288,7 +288,7 @@
                                                       (just #::znode{:type ::znode/created!})
                                                       (contains #::znode{:type ::znode/datum :value 0})]))
           (let [$grandchild (add-descendant $root "/child/grandchild" (with-meta #{1 2 3} {:foo "bar"}))]
-            (create $grandchild)
+            (create! $grandchild)
             $child => (eventually-streams 1 3000 (just [(just #::znode{:type ::znode/children-changed :inserted (just #{$grandchild})
                                                                        :removed #{} :stat (stat? {})})]))
             $grandchild => (eventually-streams 2 3000 (just [#::znode{:type ::znode/watch-start}

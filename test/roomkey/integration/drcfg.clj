@@ -85,7 +85,7 @@
                                         zc (zoo/connect (.getConnectString server))]
                               (binding [*zc* zc
                                         *connect-string* (.getConnectString server)
-                                        roomkey.drcfg/*root* (znode/create-root)]
+                                        roomkey.drcfg/*root* (znode/new-root)]
                                 (db-initialize! *connect-string* sandbox 5000)
                                 ?form)))])
 

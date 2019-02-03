@@ -7,19 +7,19 @@
             [midje.experimental :refer [for-all]]))
 
 (fact "Can create a root ZNode"
-      (let [$root (create-root)]
+      (let [$root (new-root)]
         $root => (partial instance? roomkey.znode.ZNode)
         (.path $root) => "/"
         (seq $root) => empty?))
 
 (fact "Can create a psuedo-root ZNode"
-      (let [$root (create-root "/myroot")]
+      (let [$root (new-root "/myroot")]
         $root => (partial instance? roomkey.znode.ZNode)
         (.path $root) => "/myroot"
         (seq $root) => empty?))
 
 (fact "Can create and identify children of a node"
-      (let [$root (create-root)]
+      (let [$root (new-root)]
         (add-descendant $root "/a0" "a0") => (partial instance? roomkey.znode.ZNode)
         (add-descendant $root "/a1" "a1") => (partial instance? roomkey.znode.ZNode)
         (seq $root) => (two-of (partial instance? roomkey.znode.ZNode))))
@@ -28,7 +28,7 @@
  [int gen/int]
  {:num-tests 1000}
  (fact "ZNodes know their identity"
-       (let [$root (create-root)
+       (let [$root (new-root)
              $child0 (add-descendant $root "/a" int)
              $child1 (add-descendant $root "/a11/b" 1)
              $child2 (add-descendant $root "/a11/b" 1)
@@ -57,7 +57,7 @@
  [int gen/int]
  {:num-tests 1000}
  (fact "Existing children are never overwritten but may be overlaid"
-       (let [$root (create-root)
+       (let [$root (new-root)
              $child0 (add-descendant $root "/a" int)
              $child1 (add-descendant $root "/a1/b" 1)
              $child2 (add-descendant $root "/a2/b" 2)
@@ -78,25 +78,25 @@
          )))
 
 (fact "Can create descendants of the root ZNode"
-      (let [$root (create-root)]
+      (let [$root (new-root)]
         (add-descendant $root "/a0" "a0") => (partial instance? roomkey.znode.ZNode)
         (add-descendant $root "/a1" "a1") => (partial instance? roomkey.znode.ZNode)
         (add-descendant $root "/a1/b1" "b1") => (partial instance? roomkey.znode.ZNode)
         (add-descendant $root "/a2/b2/c1/d1/e1" "e1") => (partial instance? roomkey.znode.ZNode)))
 
 (fact "Can create descendants of arbitrary znodes"
-      (let [$root (create-root)
+      (let [$root (new-root)
             $child (add-descendant $root "/a" "a")]
         (add-descendant $child "/b" "b") => (partial instance? roomkey.znode.ZNode)))
 
 (fact "ZNodes know their path in the tree"
-      (let [$root (create-root)
+      (let [$root (new-root)
             $child (add-descendant $root "/a" "a")]
         (.path $root) => "/"
         (.path $child) => "/a"
         (.path (add-descendant $root "/a/b/c/d" 4)) => "/a/b/c/d"
         (.path (add-descendant $child "/b1/c/d" 4)) => "/a/b1/c/d")
-      (let [$root (create-root "/a/b/c")
+      (let [$root (new-root "/a/b/c")
             $child (add-descendant $root "/d" "a")]
         (.path $root) => "/a/b/c"
         (.path $child) => "/a/b/c/d"
@@ -104,7 +104,7 @@
         (.path (add-descendant $child "/e1/f/g" 4)) => "/a/b/c/d/e1/f/g"))
 
 (fact "ZNode supports `cloure.lang.Named`"
-      (let [$root (create-root)
+      (let [$root (new-root)
             $child (add-descendant $root "/a0" 0)
             $g4 (add-descendant $root "/a1/b/c/d" 1)]
         (name $root) => ""
@@ -113,7 +113,7 @@
         (namespace $child) => nil
         (name $g4) => "d"
         (namespace $g4) => "/a1/b/c")
-      (let [$psuedo-root (create-root "/a/b/c")
+      (let [$psuedo-root (new-root "/a/b/c")
             $child (add-descendant $psuedo-root "/d" 0)
             $g4 (add-descendant $psuedo-root "/d/e/f/g" 1)]
         (name $psuedo-root) => "c"
@@ -124,29 +124,29 @@
         (namespace $g4) => "/a/b/c/d/e/f"))
 
 (fact "ZNode supports `cloure.lang.IMeta`"
-      (let [$root (create-root)
+      (let [$root (new-root)
             $child (add-descendant $root "/a0" 0)]
         (meta $root) => (contains {:version -1 :cversion -1 :aversion -1})))
 
 (fact "ZNode supports `cloure.lang.IDeref`"
-      (let [$root (create-root)
+      (let [$root (new-root)
             $child (add-descendant $root "/a0" 0)]
         (deref $child) => 0))
 
 (fact "ZNode supports `cloure.lang.Seqable`"
-      (let [$root (create-root)
+      (let [$root (new-root)
             $child0 (add-descendant $root "/a0" 0)
             $child1 (add-descendant $root "/a1" 0)]
         (seq $root) => (just #{$child0 $child1})))
 
 (fact "ZNode supports `cloure.lang.Seqable`"
-      (let [$root (create-root)
+      (let [$root (new-root)
             $child0 (add-descendant $root "/a0" 0)
             $child1 (add-descendant $root "/a1" 0)]
         (count $root) => 2))
 
 (fact "ZNode supports `ITransientCollection` and `ITransientSet`"
-      (let [$root (create-root)
+      (let [$root (new-root)
             z0 (default (.client $root) "/a1")
             z1 (default (.client $root) "/a1")]
         (conj! $root z0) => $root
@@ -157,7 +157,7 @@
         (get $root z0) => falsey))
 
 (fact "ZNode supports `IFn`"
-      (let [$root (create-root)
+      (let [$root (new-root)
             $child (add-descendant $root "/a/b/c" 0)]
         ($root "/a") => (partial instance? roomkey.znode.ZNode)
         ($root "/a/b/c") => $child
@@ -168,7 +168,7 @@
  [int gen/int]
  {:num-tests 5000}
  (fact "ZNodes have two kinds of \"consistent\" signatures" ; which are hopefully stable across many useful instances of the Clojure runtime
-       (let [$root (create-root)]
+       (let [$root (new-root)]
          (add-descendant $root "/a" "a")
          (add-descendant $root "/a/b0" "b0")
          (add-descendant $root "/a/b1" "b1")
@@ -179,7 +179,7 @@
  [int gen/int]
  {:num-tests 50}
  (fact "ZNodes are comparable"
-       (let [$root (create-root)
+       (let [$root (new-root)
              $child0 (add-descendant $root "/child0" 0)
              $child1 (add-descendant $root "/child1" (with-meta #{1 2 3} {:foo "bar"}))
              $grandchild (add-descendant $root "/child0/grandchild" 0)]

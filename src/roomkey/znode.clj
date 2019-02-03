@@ -106,17 +106,18 @@
 
 (defprotocol BackedZNode
   "A Proxy for a ZooKeeper znode"
-  (create [this] "Create the znode backing this virtual node")
-  (delete [this version] "Delete this znode, asserting the current version")
+  (create! [this] "Create the znode backing this virtual node")
+  (delete! [this version] "Delete this znode, asserting the current version")
+  (compare-version-and-set! [this current-version new-value]   "Atomically set the value of this znode to `new-value` if and only if the current
+  version is identical to `current-version`. Returns true if set happened, else false")
   (watch [this] "Recursively watch the znode and its children, returning a WatchManager that can be closed to cease watching, read from to
  get the results of watching and, as seq'd, to obtain the WatchManagers of its children")
-  (actualize [this wmgr] "Recursively persist this ZNode, informing the watch manager of relevant events")
-  (compareVersionAndSet [this version value] "Update the znode with the given value asserting the current version")
+  (actualize! [this wmgr] "Recursively persist this ZNode, informing the watch manager of relevant events")
   (signature [this] "Return a (Clojure) hash equivalent to a signature of the state of the subtree at this ZNode"))
 
 (defprotocol VirtualNode
   "A value-bearing node in a tree"
-  (update-or-create-child [this path value] "Update the existing child or create a new child of this node at the given path & with the given default value")
+  (update-or-add-child [this path value] "Update the existing child or create a new child of this node at the given path & with the given default value")
   (overlay [this v] "Overlay the existing placeholder node's value with a concrete value"))
 
 (declare ->ZNode)
@@ -175,17 +176,17 @@
     ;; This should be safe, but it is a (Clojure) code smell.  It could possibly be avoided through rewriting of the ZNode tree.
     (dosync (alter value (fn [old-v] (if (not= old-v v) (do (assert (= old-v ::placeholder) "Can't overwrite existing child") v) old-v))))
     this)
-  (update-or-create-child [this path v]
+  (update-or-add-child [this path v]
     (let [z' (default client path v)]
       (.get (conj! this z') z')))
 
   BackedZNode
-  (create [this] ; Synchronously create the node @ version zero, if not already present
+  (create! [this] ; Synchronously create the node @ version zero, if not already present
     (let [data [@value (meta @value)]]
       (when (zclient/create-znode client path {:persistent? true :data (*serialize* data)})
         (log/debugf "Created %s" (str this))
         true)))
-  (delete [this version]
+  (delete! [this version]
     (zclient/delete client path version {})
     (log/debugf "Deleted %s" (str this))
     true)
@@ -251,14 +252,14 @@
                          n))))]
         (async/>!! events {::type ::watch-start})
         (->WatchManager znode-events rc cwms))))
-  (actualize [this wmgr]
+  (actualize! [this wmgr]
     (if-let [stat' (zclient/exists client path {:watcher (partial async/put! wmgr)})]
       (dosync (ref-set stat (process-stat* stat')))
-      (create this))
-    (doseq [[child cwmgr] (seq wmgr)] (actualize child cwmgr))
+      (create! this))
+    (doseq [[child cwmgr] (seq wmgr)] (actualize! child cwmgr))
     (async/>!! wmgr {:event-type ::Boot})
     wmgr)
-  (compareVersionAndSet [this version value]
+  (compare-version-and-set! [this version value]
     (let [data [value (meta value)]
           stat' (zclient/set-data client path (*serialize* data) version {})]
       (when stat'
@@ -344,14 +345,6 @@
   (hashCode [this] (.hashCode [path client]))
   (toString [this] (format "%s: %s" (.. this (getClass) (getSimpleName)) path)))
 
-(defn compare-version-and-set!
-  "Atomically sets the value of the znode `z` to `newval` if and only if the current
-  version of `z` is identical to `current-version`. Returns true if set
-  happened, else false"
-  [z current-version newval]
-  {:pre [(instance? roomkey.znode.ZNode z) (integer? current-version)]}
-  (.compareVersionAndSet z current-version newval))
-
 (defn add-descendant
   "Add a descendant ZNode to the given parent's (sub)tree `root` ZNode at the given (relative) `path` carrying the given `value`
   creating placeholder intermediate nodes as required."
@@ -361,8 +354,8 @@
     (let [abs-path (as-> (str (.path parent) head) s
                      (if (.startsWith s "//") (.substring s 1) s))]
       (if-not (empty? tail)
-        (recur (update-or-create-child parent abs-path ::placeholder) tail value)
-        (update-or-create-child parent abs-path value)))
+        (recur (update-or-add-child parent abs-path ::placeholder) tail value)
+        (update-or-add-child parent abs-path value)))
     parent))
 
 (defn- watch-client [root client]
@@ -374,18 +367,18 @@
       (if-let [[event client] (async/<! client-events)]
         (case event
           ::zclient/connected (recur (or wmgr (zclient/with-connection e-handler
-                                                (actualize root (watch root))))) ; At startup and following session expiration
+                                                (actualize! root (watch root))))) ; At startup and following session expiration
           ::zclient/expired (do (async/close! wmgr) (recur nil))
           ::zclient/closed (when wmgr (async/close! wmgr) (async/<!! wmgr)) ; failed connections start but don't connect before closing?
           (recur wmgr))
         (do (log/infof "The client event channel for %s has closed, shutting down" (str root))
             (if wmgr (async/<!! wmgr) 0))))))
 
-(defn create-root
+(defn new-root
   "Create a root znode"
-  ([] (create-root "/"))
-  ([abs-path] (create-root abs-path ::root))
-  ([abs-path value] (create-root abs-path value (zclient/create)))
+  ([] (new-root "/"))
+  ([abs-path] (new-root abs-path ::root))
+  ([abs-path value] (new-root abs-path value (zclient/create)))
   ([abs-path value zclient]
    (let [events (async/chan (async/sliding-buffer 4))]
      (->ZNode zclient abs-path (ref {:version -1 :cversion -1 :aversion -1}) (ref value) (ref #{}) events))))
