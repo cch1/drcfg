@@ -134,7 +134,8 @@
   [parent childs paths]
   (let [path-prefix (as-> (str (.path parent) "/") s (if (= s "//") "/" s))
         childs' (into #{} (comp (map (fn [segment] (str path-prefix segment)))
-                                (map (fn [path] (default (.client parent) path)))) paths)]
+                                (map (fn [path] (or (some #(when (= path (.path %)) %) @(.children parent))
+                                                    (default (.client parent) path))))) paths)]
     (let [child-adds (set/difference childs' childs)
           child-dels (set/difference childs childs')]
       [child-adds child-dels])))

@@ -276,3 +276,22 @@
                                                            (contains #::znode{:type ::znode/datum :value 0})]))
           (signature $grandchild) => (just [integer? -1249580007])
           (signature $root) => (just [integer? -1188681409]))))
+
+(fact "Added descendant ZNodes can be created and will merge into watched tree"
+      (let [$root (create-root)
+            $child (add-descendant $root "/child" 0)]
+        (with-connection $root (str connect-string sandbox) 500
+          $root => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start}
+                                                     (just #::znode{:type ::znode/created!})
+                                                     (contains #::znode{:type ::znode/datum :value ::znode/root})]))
+          $child => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start}
+                                                      (just #::znode{:type ::znode/created!})
+                                                      (contains #::znode{:type ::znode/datum :value 0})]))
+          (let [$grandchild (add-descendant $root "/child/grandchild" (with-meta #{1 2 3} {:foo "bar"}))]
+            (create $grandchild)
+            $child => (eventually-streams 1 3000 (just [(just #::znode{:type ::znode/children-changed :inserted (just #{$grandchild})
+                                                                       :removed #{} :stat (stat? {})})]))
+            $grandchild => (eventually-streams 2 3000 (just [#::znode{:type ::znode/watch-start}
+                                                             (contains #::znode{:type ::znode/datum :value #{1 2 3}})]))))
+        (let [$grandchild ($root "/child/grandchild")]
+          $grandchild => (eventually-streams 1 2000 (just [#::znode{:type ::znode/watch-stop}])))))
