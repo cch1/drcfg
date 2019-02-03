@@ -8,6 +8,6 @@ It's a pain in the ass to have to create both nodes (X and X.metadata).  A tuple
 ## Move reporting to separate namespace
  * Use this to get used zrefs: echo wchp | nc 127.0.0.1 2181 | grep drcfg | sort
 
-## Call `removeAllWatches` on ZNode shutdown once server is on version > 3.5.0
+## Call `removeAllWatches` on ZNode shutdown once server is on version >= 3.5.0
 
-## Call `create` on ZNode to return Stat structure once server is on version > 3.5.0
+## Call `create` on ZNode to return Stat structure once server is on (presumably) version >= 3.5.0
