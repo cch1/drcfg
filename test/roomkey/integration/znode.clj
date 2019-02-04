@@ -44,7 +44,7 @@
                  (chatty-checker [actual] (extended-= (meta actual) expected-metadata))))
 
 (defchecker has-ref-state [expected-value]
-  (let [builder (fn [actual] [(deref (.stat actual)) (deref (.value actual)) (deref (.children actual))])]
+  (let [builder (fn [actual] (dosync [(deref (.stat actual)) (deref (.value actual)) (deref (.children actual))]))]
     (chatty-checker [actual] (extended-= (builder actual) (just expected-value)))))
 
 (background (around :facts (with-open [c (zoo/connect connect-string)]
@@ -67,8 +67,8 @@
           $child => (eventually-streams 3 5000 (just [#::znode{:type ::znode/watch-start}
                                                       (just #::znode{:type ::znode/created!})
                                                       (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})]))
-          (compare-version-and-set! $child 0 1)
-          $child => (has-ref-state [(stat? {:version 1}) 0 empty?])
+          $child => (has-ref-state [(stat? {:version 0}) 0 empty?])
+          (compare-version-and-set! $child 0 1) => truthy
           $child => (eventually-streams 1 5000 (just [(just #::znode{:type ::znode/datum :value 1 :stat (stat? {:version 1})})])))
         $child => (has-ref-state [(stat? {:version 1}) 1 empty?])))
 
