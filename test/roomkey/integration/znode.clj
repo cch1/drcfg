@@ -51,6 +51,12 @@
                              (zoo/delete-all c sandbox)
                              ?form)))
 
+(fact "Can open and close a ZNode"
+      (let [$root (new-root)
+            alm (open $root (str connect-string sandbox) 500)]
+        alm => (partial instance? java.lang.AutoCloseable)
+        (.close alm) => anything))
+
 (fact "ZNodes can be actualized and stream current value"
       (let [$root (new-root)
             $child (add-descendant $root "/child" 0)]

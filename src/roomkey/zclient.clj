@@ -60,7 +60,6 @@
 ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html
 (defprotocol Connectable
   (open [this connect-string timeout] "Open the connection")
-  (close [this] "Close the connection")
   (connected? [this] "Is this client currently connected to the ZooKeeper cluster?"))
 
 (defprotocol ZooKeeperFacing
@@ -108,34 +107,32 @@
 (deftype ZClient [commands client-atom client-events mux]
   Connectable
   (open [this connect-string timeout] ; TODO: allow parameterization of ZooKeeper instantiation
+    (assert (nil? @client-atom) "Must close current connection before opeing a new connection!")
     (let [raw-client-events (async/chan 1 (map event-to-map))
           client-watcher (make-watcher (partial async/put! raw-client-events))]
       (reset! client-atom (ZooKeeper. connect-string timeout client-watcher true))
       (async/put! client-events [::started @client-atom])
-      (async/go-loop [] ; https://zookeeper.apache.org/doc/r3.5.4-beta/zookeeperProgrammers.html#ch_zkSessions
-        (if-let [{:keys [event-type keeper-state path] :as event} (async/alt! raw-client-events ([v] v) commands nil)]
-          (do
-            (assert (and (nil? path) (= :None event-type)) (format "Received node event %s for path %s on client event handler!" event-type path))
-            (log/debugf "Received raw client state event %s" keeper-state)
-            (case keeper-state
-              :SyncConnected (async/put! client-events [::connected @client-atom])
-              :Disconnected (async/put! client-events [::disconnected @client-atom])
-              :Expired (let [z' (ZooKeeper. connect-string timeout client-watcher true)]
-                         ;; Do we need to close the old client?
-                         (async/put! client-events [::expired @client-atom])
-                         (swap! client-atom (constantly z'))
-                         (async/put! client-events [::started @client-atom])
-                         (log/warnf "Session expired, new client created (%s)" (str this)))
-              (throw (Exception. (format "Unexpected event: %s" event))))
-            (recur))
-          (do
-            (log/debugf "Event processing closed for %s" (str this))
-            (async/put! client-events [::closed (swap! client-atom (fn [client] (when client (.close client 1000)) client))])))))
-    (log/debugf "Event processing opened for %s" (str this))
-    this)
-  (close [this]
-    (async/put! commands ::close)
-    this)
+      (let [rc (async/go-loop [] ; https://zookeeper.apache.org/doc/r3.5.4-beta/zookeeperProgrammers.html#ch_zkSessions
+                 (if-let [{:keys [event-type keeper-state path] :as event} (async/alt! raw-client-events ([v] v) commands nil)]
+                   (do
+                     (assert (and (nil? path) (= :None event-type)) (format "Received node event %s for path %s on client event handler!" event-type path))
+                     (log/debugf "Received raw client state event %s" keeper-state)
+                     (case keeper-state
+                       :SyncConnected (async/put! client-events [::connected @client-atom])
+                       :Disconnected (async/put! client-events [::disconnected @client-atom])
+                       :Expired (let [z' (ZooKeeper. connect-string timeout client-watcher true)]
+                                  ;; Do we need to close the old client?
+                                  (async/put! client-events [::expired @client-atom])
+                                  (swap! client-atom (constantly z'))
+                                  (async/put! client-events [::started @client-atom])
+                                  (log/warnf "Session expired, new client created (%s)" (str this)))
+                       (throw (Exception. (format "Unexpected event: %s" event))))
+                     (recur))
+                   (do
+                     (log/debugf "Event processing closed for %s" (str this))
+                     (async/put! client-events [::closed (swap! client-atom (fn [client] (when client (.close client 1000)) nil))]))))]
+        (log/debugf "Event processing opened for %s" (str this))
+        (reify java.lang.AutoCloseable (close [_] (async/put! commands ::close) (async/<!! rc))))))
   (connected? [this] (when-let [client @client-atom]
                        (when (= :CONNECTED (some-> client .getState .toString keyword))
                          client)))

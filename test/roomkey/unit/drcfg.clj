@@ -18,7 +18,7 @@
         (zref/create *root* "/ns/x" 1) => (atom 1)))
 
 (fact "open starts zrefs with client specs"
-      (open "cspecs") => ..client..
+      (open "cspecs") => (partial instance? java.lang.AutoCloseable)
       (provided
        (zclient/open (as-checker (partial instance? roomkey.zclient.ZClient)) "cspecs/drcfg" (as-checker integer?)) => ..client..))
 

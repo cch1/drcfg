@@ -358,37 +358,27 @@
         (update-or-add-child parent abs-path value)))
     parent))
 
-(defn- watch-client [root client]
-  (let [client-events (async/tap client (async/chan 5))
+(defn open
+  "Open a ZooKeeper client connection and watch for client status changes to manage watches on `root` and its descendants"
+  [root & args]
+  (let [client (.client root)
+        client-events (async/tap client (async/chan 3))
         e-handler (fn [e type]
                     (log/warnf "Unrecoverable client error (%s) watching/actualizing drcfg znode tree, aborting." type)
-                    nil)]
-    (async/go-loop [wmgr nil] ; start event listener loop
-      (if-let [[event client] (async/<! client-events)]
-        (case event
-          ::zclient/connected (recur (or wmgr (zclient/with-connection e-handler
-                                                (actualize! root (watch root))))) ; At startup and following session expiration
-          ::zclient/expired (do (async/close! wmgr) (recur nil))
-          ::zclient/closed (when wmgr (async/close! wmgr) (async/<!! wmgr)) ; failed connections start but don't connect before closing?
-          (recur wmgr))
-        (do (log/infof "The client event channel for %s has closed, shutting down" (str root))
-            (if wmgr (async/<!! wmgr) 0))))))
-
-(defn new-root
-  "Create a root znode"
-  ([] (new-root "/"))
-  ([abs-path] (new-root abs-path ::root))
-  ([abs-path value] (new-root abs-path value (zclient/create)))
-  ([abs-path value zclient]
-   (let [events (async/chan (async/sliding-buffer 4))]
-     (->ZNode zclient abs-path (ref {:version -1 :cversion -1 :aversion -1}) (ref value) (ref #{}) events))))
-
-(defn open
-  "Open a ZooKeeper client connection and watch for client status changes to manage watches on `znode`"
-  [znode & args]
-  (let [zclient (.client znode)]
-    (watch-client znode zclient)
-    (apply zclient/open zclient args)))
+                    nil)
+        rc (async/go-loop [wmgr nil] ; start event listener loop
+             (if-let [[event client] (async/<! client-events)]
+               (do (log/debugf "Root client event %s (%s)" event wmgr)
+                   (case event
+                     ::zclient/connected (recur (or wmgr (zclient/with-connection e-handler
+                                                           (actualize! root (watch root))))) ; At startup and following session expiration
+                     ::zclient/expired (do (async/close! wmgr) (recur nil))
+                     ::zclient/closed (when wmgr (async/close! wmgr) (async/<!! wmgr)) ; failed connections start but don't connect before closing?
+                     (recur wmgr)))
+               (do (log/infof "The client event channel closed, shutting down root %s" (str root))
+                   (if wmgr (async/<!! wmgr) 0))))]
+    (let [zclient-handle (apply zclient/open client args)]
+      (reify java.lang.AutoCloseable (close [_]  (.close zclient-handle) (async/<!! rc))))))
 
 (defmacro with-connection
   [znode connect-string timeout & body]
@@ -398,12 +388,21 @@
          t# ~timeout
          c# (async/chan 10)]
      (async/tap z# c#)
-     (let [r# (with-open [client# (open znode# cs# t#)]
+     (let [r# (with-open [_# (open znode# cs# t#)]
                 (let [event# (first (async/<!! c#))] (assert (= ::zclient/started event#)))
                 (let [event# (first (async/<!! c#))] (assert (= ::zclient/connected event#)))
                 ~@body)]
-       (let [event# (first (async/<!! c#))] (assert (= ::zclient/closed event#) (str event#)))
+       (let [event# (first (async/<!! c#))] (assert (= ::zclient/closed event#)))
        r#)))
+
+(defn new-root
+  "Create a root znode"
+  ([] (new-root "/"))
+  ([abs-path] (new-root abs-path ::root))
+  ([abs-path value] (new-root abs-path value (zclient/create)))
+  ([abs-path value zclient]
+   (let [events (async/chan (async/sliding-buffer 4))]
+     (->ZNode zclient abs-path (ref {:version -1 :cversion -1 :aversion -1}) (ref value) (ref #{}) events))))
 
 ;; https://stackoverflow.com/questions/49373252/custom-pprint-for-defrecord-in-nested-structure
 ;; https://stackoverflow.com/questions/15179515/pretty-printing-a-record-using-a-custom-method-in-clojure

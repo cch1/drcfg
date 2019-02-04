@@ -54,7 +54,7 @@
       (let [events (async/chan 1)
             $c (create)]
         (connected? $c) => falsey
-        (with-open [$c (open $c $cstring0 5000)]
+        (with-open [_ (open $c $cstring0 5000)]
           $c => (partial instance? ZClient)
           (async/<!! (async/tap $c events)) => (just [:roomkey.zclient/connected (partial instance? ZooKeeper)])
           $c => (refers-to (partial instance? ZooKeeper))
@@ -65,20 +65,20 @@
             c (async/chan 1)
             $client (create)]
         (async/tap $client c)
-        (with-open [$c (open $client (.getConnectString test-server) 5000)]
+        (with-open [_ (open $client (.getConnectString test-server) 5000)]
           c  => (eventually-streams 2 3000 (just [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])
                                                   (just [:roomkey.zclient/connected (partial instance? ZooKeeper)])]))
-          (create-znode $c "/myznode" {:data (.getBytes "Hello World") :persistent? true}) => truthy
-          (create-znode $c "/myznode/child" {}) => truthy
-          (exists $c "/myznode" {}) => (contains {:version 0})
-          (exists $c "/notmyznode" {}) => falsey
-          (data $c "/myznode" {}) => (just {:data (bytes-of "Hello World") :stat (contains {:version 0})})
-          (set-data $c "/myznode" (.getBytes "foo") 0 {}) => (contains {:version 1})
-          (set-data $c "/myznode" (.getBytes "foo") 0 {}) => nil
+          (create-znode $client "/myznode" {:data (.getBytes "Hello World") :persistent? true}) => truthy
+          (create-znode $client "/myznode/child" {}) => truthy
+          (exists $client "/myznode" {}) => (contains {:version 0})
+          (exists $client "/notmyznode" {}) => falsey
+          (data $client "/myznode" {}) => (just {:data (bytes-of "Hello World") :stat (contains {:version 0})})
+          (set-data $client "/myznode" (.getBytes "foo") 0 {}) => (contains {:version 1})
+          (set-data $client "/myznode" (.getBytes "foo") 0 {}) => nil
           (Thread/sleep 20)
-          (children $c "/myznode" {}) => (just {:paths (one-of string?) :stat map?})
-          (delete $c "/myznode/child" 0 {}) => truthy
-          (delete $c "/myznode" 1 {}) => truthy)))
+          (children $client "/myznode" {}) => (just {:paths (one-of string?) :stat map?})
+          (delete $client "/myznode/child" 0 {}) => truthy
+          (delete $client "/myznode" 1 {}) => truthy)))
 
 (fact "Can open client to unavailable server"
       (with-open [$t0 (TestingServer. false)
@@ -87,7 +87,7 @@
               $c (async/chan 1)
               $zclient (create)]
           (async/tap $zclient $c)
-          (with-open [$client (open $zclient $cstring 5000)]
+          (with-open [_ (open $zclient $cstring 5000)]
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])])
             (.start $t0)
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])
@@ -107,7 +107,7 @@
               $c (async/chan 1)
               $zclient (create)]
           (async/tap $zclient $c)
-          (with-open [$client (open $zclient $cstring 500)]
+          (with-open [_ (open $zclient $cstring 500)]
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])])
             (.start $t)
             (async/alts!! [$c (async/timeout 3500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])
@@ -115,21 +115,21 @@
               (assert (.killServer $t instance) "Couldn't kill ZooKeeper server instance")
               (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/disconnected (partial instance? ZooKeeper)])])
               (async/alts!! [$c (async/timeout 3500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])))
-          (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/closed (partial instance? ZooKeeper)])]))))
+          (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/closed nil])]))))
 
 (fact "Client can be stopped and restarted"
       (with-open [$t (TestingServer.)]
         (let [$c (async/chan 1)
               $zclient (create)]
           (async/tap $zclient $c)
-          (with-open [$client (open $zclient (.getConnectString $t) 5000)]
+          (with-open [_ (open $zclient (.getConnectString $t) 5000)]
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])])
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])]))
-          (async/alts!! [$c (async/timeout 4500)]) => (contains [(just [:roomkey.zclient/closed (partial instance? ZooKeeper)])])
-          (with-open [$client (open $zclient (.getConnectString $t) 5000)]
+          (async/alts!! [$c (async/timeout 4500)]) => (contains [(just [:roomkey.zclient/closed nil])])
+          (with-open [_ (open $zclient (.getConnectString $t) 5000)]
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])])
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])]))
-          (async/alts!! [$c (async/timeout 4500)]) => (contains [(just [:roomkey.zclient/closed (partial instance? ZooKeeper)])]))))
+          (async/alts!! [$c (async/timeout 4500)]) => (contains [(just [:roomkey.zclient/closed nil])]))))
 
 (fact "Client can be stopped and restarted across disparate connections"
       (with-open [$t0 (TestingServer. false)
@@ -137,27 +137,27 @@
         (let [$c (async/chan 1)
               $zclient (create)]
           (async/tap $zclient $c)
-          (with-open [$client (open $zclient (.getConnectString $t0) 5000)]
+          (with-open [_ (open $zclient (.getConnectString $t0) 5000)]
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])])
             (.start $t0)
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])
             (.stop $t0)
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/disconnected (partial instance? ZooKeeper)])]))
-          (async/alts!! [$c (async/timeout 4500)]) => (contains [(just [:roomkey.zclient/closed (partial instance? ZooKeeper)])])
-          (with-open [$client (open $zclient (.getConnectString $t1) 5000)]
+          (async/alts!! [$c (async/timeout 4500)]) => (contains [(just [:roomkey.zclient/closed nil])])
+          (with-open [_ (open $zclient (.getConnectString $t1) 5000)]
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])])
             (.start $t1)
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])
             (.stop $t1)
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/disconnected (partial instance? ZooKeeper)])]))
-          (async/alts!! [$c (async/timeout 4500)]) => (contains [(just [:roomkey.zclient/closed (partial instance? ZooKeeper)])]))))
+          (async/alts!! [$c (async/timeout 4500)]) => (contains [(just [:roomkey.zclient/closed nil])]))))
 
 (fact "Client renders toString nicely"
       (let [events (async/chan 1)
             $c (create)]
         (.toString $c) => #"ZClient: <No Raw Client>"
-        (with-open [$c (open $c $cstring0 5000)]
+        (with-open [_ (open $c $cstring0 5000)]
           (async/<!! (async/tap $c events)) => (just [:roomkey.zclient/connected (partial instance? ZooKeeper)])
           (.toString $c) => #"ZClient: ZooKeeper@([0-9a-f]+) State:[A-Z]+ sessionId:0x[0-9a-f]+ server:.+:\d+")
         (Thread/sleep 500)
-        (.toString $c) => #"ZClient: ZooKeeper@([0-9a-f]+) State:[A-Z]+ sessionId:0x[0-9a-f]+ server:.+:\d+"))
+        (.toString $c) => #"ZClient: <No Raw Client>"))

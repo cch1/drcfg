@@ -102,9 +102,9 @@
 
 (fact "Can open and close connections regardless of viability"
       (with-open [c (open bogus-host roomkey.drcfg/*root*)]
-        c => (partial instance? roomkey.zclient.ZClient))
+        c => (partial instance? java.lang.AutoCloseable))
       (with-open [c (open *connect-string* roomkey.drcfg/*root*)]
-        c => (partial instance? roomkey.zclient.ZClient)))
+        c => (partial instance? java.lang.AutoCloseable)))
 
 (fact "Slaved config value gets updated post-connect"
       (let [p "/n/p0001" ; (next-path)
