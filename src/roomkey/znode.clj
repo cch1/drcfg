@@ -392,12 +392,13 @@
 
 (defmacro with-connection
   [znode connect-string timeout & body]
-  `(let [z# (.client ~znode)
+  `(let [znode# ~znode
+         z# (.client znode#)
          cs# ~connect-string
          t# ~timeout
          c# (async/chan 10)]
      (async/tap z# c#)
-     (let [r# (with-open [client# (open ~znode cs# t#)]
+     (let [r# (with-open [client# (open znode# cs# t#)]
                 (let [event# (first (async/<!! c#))] (assert (= ::zclient/started event#)))
                 (let [event# (first (async/<!! c#))] (assert (= ::zclient/connected event#)))
                 ~@body)]
