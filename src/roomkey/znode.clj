@@ -210,7 +210,7 @@
             rc (async/go-loop [cwms cwms]
                  (if-let [{:keys [event-type keeper-state] :as event} (async/<! znode-events)]
                    (do
-                     (log/debugf "Event [%s:%s] for %s" event-type keeper-state (str this))
+                     (log/tracef "Event [%s:%s] for %s" event-type keeper-state (str this))
                      (when-let [cwms (case event-type
                                        :None cwms ; Disconnected and Expired keeper states are reported here
                                        ::Boot (do (async/>! znode-events {:event-type :NodeDataChanged})
