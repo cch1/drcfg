@@ -118,20 +118,16 @@
             (assert (and (nil? path) (= :None event-type)) (format "Received node event %s for path %s on client event handler!" event-type path))
             (log/debugf "Received raw client state event %s" keeper-state)
             (case keeper-state
-              :SyncConnected (do
-                               (async/put! client-events [::connected @client-atom])
-                               (recur))
-              :Disconnected (do
-                              (async/put! client-events [::disconnected @client-atom])
-                              (recur))
+              :SyncConnected (async/put! client-events [::connected @client-atom])
+              :Disconnected (async/put! client-events [::disconnected @client-atom])
               :Expired (let [z' (ZooKeeper. connect-string timeout client-watcher true)]
                          ;; Do we need to close the old client?
                          (async/put! client-events [::expired @client-atom])
                          (swap! client-atom (constantly z'))
                          (async/put! client-events [::started @client-atom])
-                         (log/warnf "Session expired, new client created (%s)" (str this))
-                         (recur))
-              (throw (Exception. (format "Unexpected event: %s" event)))))
+                         (log/warnf "Session expired, new client created (%s)" (str this)))
+              (throw (Exception. (format "Unexpected event: %s" event))))
+            (recur))
           (do
             (log/debugf "Event processing closed for %s" (str this))
             (async/put! client-events [::closed (swap! client-atom (fn [client] (when client (.close client 1000)) client))])))))
