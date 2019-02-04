@@ -151,3 +151,13 @@
             (.stop $t1)
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/disconnected (partial instance? ZooKeeper)])]))
           (async/alts!! [$c (async/timeout 4500)]) => (contains [(just [:roomkey.zclient/closed (partial instance? ZooKeeper)])]))))
+
+(fact "Client renders toString nicely"
+      (let [events (async/chan 1)
+            $c (create)]
+        (.toString $c) => #"ZClient: <No Raw Client>"
+        (with-open [$c (open $c $cstring0 5000)]
+          (async/<!! (async/tap $c events)) => (just [:roomkey.zclient/connected (partial instance? ZooKeeper)])
+          (.toString $c) => #"ZClient: ZooKeeper@([0-9a-f]+) State:[A-Z]+ sessionId:0x[0-9a-f]+ server:.+:\d+")
+        (Thread/sleep 500)
+        (.toString $c) => #"ZClient: ZooKeeper@([0-9a-f]+) State:[A-Z]+ sessionId:0x[0-9a-f]+ server:.+:\d+"))

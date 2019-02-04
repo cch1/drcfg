@@ -13,9 +13,6 @@
             [clojure.core.async :as async]
             [clojure.tools.logging :as log]))
 
-;; https://github.com/liebke/zookeeper-clj
-;; https://github.com/torsten/zookeeper-atom
-
 (def acls {:open-acl-unsafe ZooDefs$Ids/OPEN_ACL_UNSAFE ; This is a completely open ACL
            :anyone-id-unsafe ZooDefs$Ids/ANYONE_ID_UNSAFE ; This Id represents anyone
            :auth-ids ZooDefs$Ids/AUTH_IDS ; This Id is only usable to set ACLs
@@ -115,7 +112,7 @@
           client-watcher (make-watcher (partial async/put! raw-client-events))]
       (reset! client-atom (ZooKeeper. connect-string timeout client-watcher true))
       (async/put! client-events [::started @client-atom])
-      (async/go-loop []
+      (async/go-loop [] ; https://zookeeper.apache.org/doc/r3.5.4-beta/zookeeperProgrammers.html#ch_zkSessions
         (if-let [{:keys [event-type keeper-state path] :as event} (async/alt! raw-client-events ([v] v) commands nil)]
           (do
             (assert (and (nil? path) (= :None event-type)) (format "Received node event %s for path %s on client event handler!" event-type path))
@@ -127,17 +124,18 @@
               :Disconnected (do
                               (async/put! client-events [::disconnected @client-atom])
                               (recur))
-              :Expired (do (log/warnf "Session Expired!")
-                           (let [z' (ZooKeeper. connect-string timeout client-watcher true)]
-                             ;; Do we need to close the old client?
-                             (async/put! client-events [::expired @client-atom])
-                             (swap! client-atom (constantly z'))
-                             (async/put! client-events [::started @client-atom])
-                             (recur)))
+              :Expired (let [z' (ZooKeeper. connect-string timeout client-watcher true)]
+                         ;; Do we need to close the old client?
+                         (async/put! client-events [::expired @client-atom])
+                         (swap! client-atom (constantly z'))
+                         (async/put! client-events [::started @client-atom])
+                         (log/warnf "Session expired, new client created (%s)" (str this))
+                         (recur))
               (throw (Exception. (format "Unexpected event: %s" event)))))
           (do
-            (log/debugf "Event processing closed")
+            (log/debugf "Event processing closed for %s" (str this))
             (async/put! client-events [::closed (swap! client-atom (fn [client] (when client (.close client 1000)) client))])))))
+    (log/debugf "Event processing opened for %s" (str this))
     this)
   (close [this]
     (async/put! commands ::close)
@@ -193,7 +191,20 @@
   clojure.core.async.Mult
   (tap* [m ch close?] (async/tap* mux ch close?))
   (untap* [m ch] (async/untap* mux ch))
-  (untap-all* [m] (async/untap-all* mux)))
+  (untap-all* [m] (async/untap-all* mux))
+
+  java.lang.Object
+  (toString [this] (format "%s: %s"
+                           (.. this (getClass) (getSimpleName))
+                           (if-let [client @client-atom]
+                             (let [server (last (re-find #"remoteserver:(\S+)" (.toString client))) ; FIXME: get the remote server cleanly
+                                   b (bean client)]
+                               (format "ZooKeeper@%08x State:%s sessionId:0x%15x server:%s"
+                                       (System/identityHashCode client)
+                                       (:state b)
+                                       (:sessionId b)
+                                       server))
+                             "<No Raw Client>"))))
 
 (defn create
   []
