@@ -153,10 +153,10 @@
 
 (defn- make-connection-loss-handler
   "Return a handler for client connection loss that closes the node event channel"
-  [znode wmgr]
+  [znode c]
   (fn [e type]
     (log/infof "Unrecoverable client error (%s) on %s, shutting down watch" type (str znode))
-    (async/close! wmgr)
+    (async/close! c)
     nil))
 
 (deftype WatchManager [input output child-watch-managers]
@@ -374,7 +374,7 @@
                      ::zclient/connected (recur (or wmgr (let [wmgr (watch root)] ; At startup and following session expiration
                                                            (zclient/with-connection e-handler (actualize! root wmgr))
                                                            wmgr)))
-                     ::zclient/expired (do (async/close! wmgr) (recur nil))
+                     ::zclient/expired (do (.close wmgr) (recur nil))
                      ::zclient/closed (if wmgr (.close wmgr) 0) ; failed connections start but don't connect before closing?
                      (recur wmgr)))
                (do (log/infof "The client event channel closed, shutting down root %s" (str root))
