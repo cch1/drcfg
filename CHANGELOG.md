@@ -1,3 +1,7 @@
+## Version 6.0.1
+* Overhaul open and close to squash out race conditions
+* Tweak logging
+
 ## Version 6.0.0
 ### Big changes to ZRefs and ZClient, but only small changes to API of drcfg
 * Deprecate `zref/zref` in favor of `zref/create`
