@@ -190,7 +190,7 @@
     (log/debugf "Deleted %s" (str this))
     true)
   (watch [this]
-    (log/debugf "Watching %s" (str this))
+    (log/tracef "Watching %s" (str this))
     (let [handle-channel-error (fn [e] (log/errorf e "Exception while processing channel event for %s" (str this)))
           znode-events (async/chan 10 identity handle-channel-error)
           data-events (async/chan (async/sliding-buffer 4) (zdata-xform this) handle-channel-error)
@@ -246,11 +246,11 @@
                        (recur cwms)
                        (do (async/>! events {::type ::watch-stop})
                            (let [n (transduce (map (fn [wmgr] (.close wmgr))) + 1 (vals cwms))]
-                             (log/infof "The event channel closed UNEXPECTEDLY with %d nodes seen; shutting down %s" n (str this))
+                             (log/warnf "The event channel closed abruptly with %d nodes seen; shutting down %s" n (str this))
                              n))))
                    (do (async/>! events {::type ::watch-stop})
                        (let [n (transduce (map (fn [wmgr] (.close wmgr))) + 1 (vals cwms))]
-                         (log/debugf "The event channel closed with %d nodes seen; shutting down %s" n (str this))
+                         (log/tracef "The event channel closed with %d nodes seen; shutting down %s" n (str this))
                          n))))]
         (async/>!! events {::type ::watch-start})
         (->WatchManager znode-events rc cwms))))
@@ -378,9 +378,10 @@
                      ::zclient/expired (do (.close wmgr) (recur nil))
                      ::zclient/closed (if wmgr (.close wmgr) 0) ; failed connections start but don't connect before closing?
                      (recur wmgr)))
-               (do (log/infof "The client event channel closed, shutting down root %s" (str root))
-                   (async/close! tap)
-                   (if wmgr (.close wmgr) 0))))]
+               (let [n (if wmgr (.close wmgr) 0)]
+                 (async/close! tap)
+                 (log/infof "The client event channel closed with %d nodes seen, shutting down %s" (str root) n)
+                 n)))]
     (let [zclient-handle (apply zclient/open client args)]
       (reify Closeable (close [_] (.close zclient-handle) (async/<!! rc))))))
 
