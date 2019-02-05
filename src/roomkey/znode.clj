@@ -376,7 +376,7 @@
                                                            (zclient/with-connection e-handler (actualize! root wmgr))
                                                            wmgr)))
                      ::zclient/expired (do (async/close! wmgr) (recur nil))
-                     ::zclient/closed (when wmgr (.close wmgr)) ; failed connections start but don't connect before closing?
+                     ::zclient/closed (if wmgr (.close wmgr) 0) ; failed connections start but don't connect before closing?
                      (recur wmgr)))
                (do (log/infof "The client event channel closed, shutting down root %s" (str root))
                    (if wmgr (.close wmgr) 0))))]
