@@ -120,6 +120,9 @@
   (update-or-add-child [this path value] "Update the existing child or create a new child of this node at the given path & with the given default value")
   (overlay [this v] "Overlay the existing placeholder node's value with a concrete value"))
 
+(defprotocol Closeable
+  (close [this] "Close the resource"))
+
 (declare ->ZNode)
 
 (defn default ; NB: This operation does not update the children of the parent
@@ -160,12 +163,8 @@
   impl/WritePort
   (put! [port val fn1-handler] (impl/put! input val fn1-handler))
 
-  impl/ReadPort
-  (take! [this handler] (impl/take! output handler))
-
-  impl/Channel
-  (closed? [this] (impl/closed? input))
-  (close! [this] (impl/close! input))
+  Closeable
+  (close [this] (async/close! input) (async/<!! output))
 
   clojure.lang.Seqable
   (seq [this] (seq child-watch-managers)))
@@ -240,14 +239,13 @@
                                                                                  (assoc cwms child wmgr))) cwms child-adds)
                                                                      (reduce (fn [cwms child]
                                                                                (log/debugf "Processed remove for %s" (str child))
-                                                                               (async/close! (cwms child))
+                                                                               (.close (cwms child))
                                                                                (dissoc cwms child)) cwms child-dels))))))
                                        (do (log/warnf "Unexpected znode event:state [%s:%s] while watching %s" event-type keeper-state (str this))
                                            cwms))]
                        (recur cwms)))
                    (do (async/>! events {::type ::watch-stop})
-                       (doseq [wmgr (vals cwms)] (async/close! wmgr))
-                       (let [n (async/<! (async/transduce identity + 1 (async/merge (vals cwms))))]
+                       (let [n (transduce (map (fn [wmgr] (.close wmgr))) + 1 (vals cwms))]
                          (log/debugf "The event channel closed with %d nodes seen; shutting down %s" n (str this))
                          n))))]
         (async/>!! events {::type ::watch-start})
@@ -373,12 +371,12 @@
                      ::zclient/connected (recur (or wmgr (zclient/with-connection e-handler
                                                            (actualize! root (watch root))))) ; At startup and following session expiration
                      ::zclient/expired (do (async/close! wmgr) (recur nil))
-                     ::zclient/closed (when wmgr (async/close! wmgr) (async/<!! wmgr)) ; failed connections start but don't connect before closing?
+                     ::zclient/closed (when wmgr (.close wmgr)) ; failed connections start but don't connect before closing?
                      (recur wmgr)))
                (do (log/infof "The client event channel closed, shutting down root %s" (str root))
-                   (if wmgr (async/<!! wmgr) 0))))]
+                   (if wmgr (.close wmgr) 0))))]
     (let [zclient-handle (apply zclient/open client args)]
-      (reify java.lang.AutoCloseable (close [_]  (.close zclient-handle) (async/<!! rc))))))
+      (reify Closeable (close [_]  (.close zclient-handle) (async/<!! rc))))))
 
 (defmacro with-connection
   [znode connect-string timeout & body]

@@ -62,6 +62,9 @@
   (open [this connect-string timeout] "Open the connection")
   (connected? [this] "Is this client currently connected to the ZooKeeper cluster?"))
 
+(defprotocol Closeable
+  (close [this] "Close the resource"))
+
 (defprotocol ZooKeeperFacing
   (create-znode [this path options] "Create a ZNode at the given path")
   (data [this path options] "Fetch the data from the ZNode at the path")
@@ -130,9 +133,9 @@
                      (recur))
                    (do
                      (log/debugf "Event processing closed for %s" (str this))
-                     (async/put! client-events [::closed (swap! client-atom (fn [client] (when client (.close client 1000)) nil))]))))]
+                     (async/put! client-events [::closed (swap! client-atom (fn [client] (when client (.close client timeout)) nil))]))))]
         (log/debugf "Event processing opened for %s" (str this))
-        (reify java.lang.AutoCloseable (close [_] (async/put! commands ::close) (async/<!! rc))))))
+        (reify Closeable (close [_] (async/put! commands ::close) (async/<!! rc))))))
   (connected? [this] (when-let [client @client-atom]
                        (when (= :CONNECTED (some-> client .getState .toString keyword))
                          client)))

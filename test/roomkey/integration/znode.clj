@@ -54,7 +54,7 @@
 (fact "Can open and close a ZNode"
       (let [$root (new-root)
             alm (open $root (str connect-string sandbox) 500)]
-        alm => (partial instance? java.lang.AutoCloseable)
+        alm => (partial instance? roomkey.znode.Closeable)
         (.close alm) => anything))
 
 (fact "ZNodes can be actualized and stream current value"
