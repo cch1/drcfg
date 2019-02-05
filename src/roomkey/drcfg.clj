@@ -50,7 +50,7 @@
   [name default & options]
   {:pre [] :post [(instance? clojure.lang.IRef %)]}
   (let [z (apply zref/create *root* name default options)]
-    (add-watch z :logger (fn [k r o n] (log/tracef "Value of %s update: old: %s; s" name o n)))
+    (add-watch z :logger (fn [k r o n] (log/tracef "Value of %s update: old: %s; new %s" name o n)))
     z))
 
 (defmacro ns-path [n]
