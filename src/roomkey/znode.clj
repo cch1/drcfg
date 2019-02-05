@@ -192,10 +192,10 @@
   (watch [this]
     (log/debugf "Watching %s" (str this))
     (let [handle-channel-error (fn [e] (log/errorf e "Exception while processing channel event for %s" (str this)))
-          znode-events (async/chan 5 identity handle-channel-error)
+          znode-events (async/chan 10 identity handle-channel-error)
           data-events (async/chan (async/sliding-buffer 4) (zdata-xform this) handle-channel-error)
           delete-events (async/chan 1 (dedupe) handle-channel-error) ; why won't a promise channel work here?
-          children-events (async/chan 5 (comp (map process-stat) (tap-children this)) handle-channel-error)
+          children-events (async/chan 10 (comp (map process-stat) (tap-children this)) handle-channel-error)
           exists-events (async/chan 1 (comp (map process-stat) (tap-stat this)) handle-channel-error)
           handle-connection-loss (make-connection-loss-handler this znode-events)
           watcher (partial async/put! znode-events)]
@@ -364,12 +364,11 @@
   "Open a ZooKeeper client connection and watch for client status changes to manage watches on `root` and its descendants"
   [root & args]
   (let [client (.client root)
-        client-events (async/tap client (async/chan 3))
         e-handler (fn [e type]
                     (log/warnf "Unrecoverable client error (%s) watching/actualizing drcfg znode tree, aborting." type)
                     nil)
         rc (async/go-loop [wmgr nil] ; start event listener loop
-             (if-let [[event client] (async/<! client-events)]
+             (if-let [[event client] (async/<! (async/tap client (async/chan 5)))]
                (do (log/debugf "Root client event %s (%s)" event wmgr)
                    (case event
                      ::zclient/connected (recur (or wmgr (let [wmgr (watch root)] ; At startup and following session expiration
@@ -404,7 +403,7 @@
   ([abs-path] (new-root abs-path ::root))
   ([abs-path value] (new-root abs-path value (zclient/create)))
   ([abs-path value zclient]
-   (let [events (async/chan (async/sliding-buffer 4))]
+   (let [events (async/chan (async/sliding-buffer 5))]
      (->ZNode zclient abs-path (ref {:version -1 :cversion -1 :aversion -1}) (ref value) (ref #{}) events))))
 
 ;; https://stackoverflow.com/questions/49373252/custom-pprint-for-defrecord-in-nested-structure
