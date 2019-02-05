@@ -380,7 +380,7 @@
                      (recur wmgr)))
                (let [n (if wmgr (.close wmgr) 0)]
                  (async/close! tap)
-                 (log/infof "The client event channel closed with %d nodes seen, shutting down %s" (str root) n)
+                 (log/infof "The client event channel closed with %d nodes seen, shutting down %s" n (str root))
                  n)))]
     (let [zclient-handle (apply zclient/open client args)]
       (reify Closeable (close [_] (.close zclient-handle) (async/<!! rc))))))
