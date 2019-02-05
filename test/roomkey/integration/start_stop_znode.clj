@@ -12,4 +12,4 @@
         (for [n (range 6)]
           (let [handle (open $z (str connect-string "/drcfg") 8000)]
             (Thread/sleep 100)
-            (.close handle))) => (six-of int?)))
+            (.close handle))) => (six-of pos-int?)))

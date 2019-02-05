@@ -367,7 +367,7 @@
         e-handler (fn [e type]
                     (log/warnf "Unrecoverable client error (%s) watching/actualizing drcfg znode tree, aborting." type)
                     nil)
-        tap (async/tap client (async/chan 20))
+        tap (async/tap client (async/chan 2))
         rc (async/go-loop [wmgr nil] ; start event listener loop
              (if-let [[event client] (async/<! tap)]
                (do (log/debugf "Root client event %s (%s)" event wmgr)
@@ -378,12 +378,14 @@
                      ::zclient/expired (do (.close wmgr) (recur nil))
                      ::zclient/closed (if wmgr (.close wmgr) 0) ; failed connections start but don't connect before closing?
                      (recur wmgr)))
-               (let [n (if wmgr (.close wmgr) 0)]
-                 (async/close! tap)
-                 (log/infof "The client event channel closed with %d nodes seen, shutting down %s" n (str root))
-                 n)))]
+               (if wmgr (.close wmgr) 0)))]
     (let [zclient-handle (apply zclient/open client args)]
-      (reify Closeable (close [_] (.close zclient-handle) (async/<!! rc))))))
+      (reify Closeable (close [_]
+                         (.close zclient-handle)
+                         (async/close! tap)
+                         (let [n (async/<!! rc)]
+                           (log/infof "The client event channel closed with %d nodes seen, shutting down %s" n (str root))
+                           n))))))
 
 (defmacro with-connection
   [znode connect-string timeout & body]
