@@ -1,4 +1,7 @@
-## Version 6.0.1
+## Version 6.2.0
+* Add clojure.lang.IFn support on ZClient.
+
+## Version 6.1.0
 * Overhaul open and close to squash out race conditions
 * Tweak logging
 
