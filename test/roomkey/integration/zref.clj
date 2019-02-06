@@ -36,6 +36,10 @@
                  (do (Thread/sleep 200)
                      (recur (- t 200))))))))
 
+(defchecker having-metadata [expected]
+  (every-checker (chatty-checker [actual] (extended-= actual expected))
+                 (chatty-checker [actual] (extended-= (meta actual) (meta expected)))))
+
 (defmacro with-awaited-connection
   [root & body]
   `(let [c# (async/chan 1)
@@ -58,11 +62,20 @@
     []
     (str "/" (swap! counter inc))))
 
+(fact "A ZRef reflects the initial default value upon creation"
+      (let [$root (znode/new-root)
+            v (with-meta ["A"] {:foo true}) ; fuck midje
+            $z (create $root "/myzref" v)]
+        (versioned-deref $z) => (just [(having-metadata ^:foo ["A"]) -1])
+        (meta $z) => (contains {:version -1})))
+
 (fact "A ZRef reflects the persisted version of the initial default value upon actualization"
       (let [$root (znode/new-root)
-            $z (create $root "/myzref" "A")]
+            v (with-meta ["A"] {:foo true})
+            $z (create $root "/myzref" v)]
         (with-awaited-connection $root
-          $z => (eventually-vrefers-to 2000 ["A" 0]))))
+          $z => (eventually-vrefers-to 2000 (just [(having-metadata ^:foo ["A"]) 0]))
+          (meta $z) => (contains {:version 0}))))
 
 (fact "Can update a connected ZRef"
       (let [$root (znode/new-root)
@@ -94,20 +107,26 @@
         (with-awaited-connection $root
           (let [c (zoo/connect (str connect-string sandbox))]
             $z => (eventually-vrefers-to 1000 ["A" 0])
-            (zoo/set-data c "/myzref" (znode/*serialize* ["B" nil]) 0)
-            $z => (eventually-vrefers-to 1000 ["B" 1])))))
+            (zoo/set-data c "/myzref" (znode/*serialize* [["B"] {:foo 2}]) 0)
+            $z => (eventually-vrefers-to
+                   1000 (just [(having-metadata ^{:foo 2} ["B"]) 1]))
+            (meta $z) => (contains {:version 1})))))
 
 (fact "A connected ZRef's watches are called when updated by changes at the cluster"
       (let [$root (znode/new-root)
-            $z (zref $root "/myzref" "A")
-            sync (promise)]
+            v (with-meta [:A] {:foo true})
+            $z (zref $root "/myzref" v)
+            sync (promise)
+            v-sync (promise)]
         (with-open [c (zoo/connect (str connect-string sandbox))]
           (with-awaited-connection $root
-            $z => (eventually-vrefers-to 1000 ["A" 0])
+            $z => (eventually-vrefers-to 1000 (just [(having-metadata ^:foo [:A]) 0]))
             (add-watch $z :sync (fn [& args] (deliver sync args)))
-            (zoo/set-data c "/myzref" (znode/*serialize* ["B" nil]) 0)
-            $z => (eventually-vrefers-to 1000 ["B" 1])
-            (deref sync 10000 :promise-never-delivered) => (just [:sync (partial instance? roomkey.zref.ZRef) "A" "B"])))))
+            (add-versioned-watch $z :v-sync (fn [& args] (deliver v-sync args)))
+            (zoo/set-data c "/myzref" (znode/*serialize* [[:B] {:bar true}]) 0)
+            $z => (eventually-vrefers-to 1000 [[:B] 1])
+            (deref v-sync 10000 :promise-never-delivered) => (just [:v-sync $z [[:A] 0] [[:B] 1]])
+            (deref sync 10000 :promise-never-delivered) => (just [:sync $z [:A] [:B]])))))
 
 (fact "A connected ZRef is not updated by invalid values at the cluster"
       (let [$root (znode/new-root)

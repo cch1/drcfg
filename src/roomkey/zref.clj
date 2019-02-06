@@ -36,7 +36,7 @@
 
 (def data-xform
   (comp (filter (comp #{:roomkey.znode/datum} :roomkey.znode/type))
-        (map (fn [{:keys [roomkey.znode/value roomkey.znode/stat]}] (with-meta [value (:version stat)] stat)))))
+        (map (fn [{:keys [roomkey.znode/value roomkey.znode/stat]}] [value stat]))))
 
 (deftype ZRef [znode cache validator watches]
   ZNodeWatching
@@ -44,10 +44,10 @@
   (start [this]
     (let [data (async/pipe znode (async/chan 1 data-xform))]
       (async/go-loop [] ; start event listener loop
-        (if-let [[value' version' :as n] (async/<! data)]
+        (if-let [[value' {version' :version} :as n] (async/<! data)]
           (do
             (log/debugf "Data element @ version %d received by %s" version' (str this))
-            (let [[value version :as o] @cache
+            (let [[value {version :version} :as o] @cache
                   delta (- version' version)]
               (cond
                 (neg? delta) (log/warnf "Received negative version delta [%d -> %d] for %s" version version' (str this))
@@ -56,7 +56,7 @@
               (if (valid? @validator value')
                 (do (reset! cache n)
                     (async/thread (doseq [[k w] @watches]
-                                    (try (w k this o n)
+                                    (try (w k this [value version] [value' version'])
                                          (catch Exception e (log/errorf e "Error in watcher %s" k))))))
                 (log/warnf "Watcher received invalid value [%s], ignoring update for %s" value' (str this))))
             (recur))
@@ -72,11 +72,11 @@
   VersionedReference
   (compareVersionAndSet [this current-version newval]
     (update! this current-version newval))
-  (vDeref [this] @cache)
+  (vDeref [this] (let [[value {version :version}] @cache] [value version]))
   (vAddWatch [this k f] (swap! watches assoc k f) this)
 
   clojure.lang.IMeta
-  (meta [this] (meta @cache))
+  (meta [this] (last @cache))
 
   clojure.lang.IDeref
   (deref [this] (-> (.vDeref this) first))
@@ -119,7 +119,7 @@
   [root-znode path default & options]
   (let [{validator :validator} (apply hash-map options)
         znode (znode/add-descendant root-znode path default)
-        z (->ZRef znode (atom (with-meta [default -1] {:version -1}))
+        z (->ZRef znode (atom [default {:version -1}])
                   (atom nil) (atom {}))]
     (when validator (.setValidator z validator))
     (start z)
