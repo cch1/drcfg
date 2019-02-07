@@ -184,9 +184,6 @@
     (when-let [stat (with-client (.exists client path (if watcher (make-watcher (comp watcher event-to-map)) watch?)))]
       (stat-to-map stat)))
 
-  clojure.lang.IDeref
-  (deref [this] (deref client-atom))
-
   clojure.core.async.Mult
   (tap* [m ch close?] (async/tap* mux ch close?))
   (untap* [m ch] (async/untap* mux ch))

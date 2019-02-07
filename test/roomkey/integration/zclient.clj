@@ -14,18 +14,6 @@
 (def $cstring1 "localhost:2181/drcfg")
 (def sandbox "/sandbox")
 
-(defchecker refers-to [expected]
-  (checker [actual] (extended-= (deref actual) expected)))
-
-(defchecker eventually-refers-to [timeout expected]
-  (checker [actual]
-           (loop [t timeout]
-             (when (pos? t)
-               (if-let [result (extended-= (deref actual) expected)]
-                 result
-                 (do (Thread/sleep 200)
-                     (recur (- t 200))))))))
-
 (defchecker bytes-of [expected]
   (checker [actual] (= (seq actual) (seq (.getBytes expected)))))
 
@@ -47,7 +35,6 @@
         (with-open [_ (open $c $cstring0 5000)]
           $c => (partial instance? ZClient)
           (async/<!! (async/tap $c events)) => (just [:roomkey.zclient/connected (partial instance? ZooKeeper)])
-          $c => (refers-to (partial instance? ZooKeeper))
           (connected? $c) => truthy)))
 
 (fact "Client can perform operations on znodes"
@@ -101,7 +88,7 @@
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])])
             (.start $t)
             (async/alts!! [$c (async/timeout 3500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])
-            (let [instance (.findConnectionInstance $t @$zclient)]
+            (let [instance (.findConnectionInstance $t @(.client-atom $zclient))]
               (assert (.killServer $t instance) "Couldn't kill ZooKeeper server instance")
               (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/disconnected (partial instance? ZooKeeper)])])
               (async/alts!! [$c (async/timeout 3500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])))
