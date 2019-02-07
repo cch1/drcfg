@@ -17,16 +17,6 @@
 (defchecker refers-to [expected]
   (checker [actual] (extended-= (deref actual) expected)))
 
-(defchecker eventually-is-realized-as [timeout expected]
-  (checker [actual]
-           (loop [t timeout]
-             (when (pos? t)
-               (if-let [result (and (realized? actual)
-                                    (extended-= (deref actual) expected))]
-                 result
-                 (do (Thread/sleep 200)
-                     (recur (- t 200))))))))
-
 (defchecker eventually-refers-to [timeout expected]
   (checker [actual]
            (loop [t timeout]
