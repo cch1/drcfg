@@ -107,16 +107,17 @@
             (~ehandler e# type#)
             (throw e#)))))
 
-(deftype ZClient [commands client-atom client-events mux]
+(deftype ZClient [client-atom mux]
   Connectable
   (open [this connect-string timeout] ; TODO: allow parameterization of ZooKeeper instantiation
     (assert (nil? @client-atom) "Must close current connection before opeing a new connection!")
-    (let [raw-client-events (async/chan 1 (map event-to-map))
+    (let [client-events (async/muxch* mux)
+          raw-client-events (async/chan 1 (map event-to-map))
           client-watcher (make-watcher (partial async/put! raw-client-events))]
       (reset! client-atom (ZooKeeper. connect-string timeout client-watcher true))
       (async/put! client-events [::started @client-atom])
       (let [rc (async/go-loop [] ; https://zookeeper.apache.org/doc/r3.5.4-beta/zookeeperProgrammers.html#ch_zkSessions
-                 (if-let [{:keys [event-type keeper-state path] :as event} (async/alt! raw-client-events ([v] v) commands nil)]
+                 (if-let [{:keys [event-type keeper-state path] :as event} (async/<! raw-client-events)]
                    (do
                      (assert (and (nil? path) (= :None event-type)) (format "Received node event %s for path %s on client event handler!" event-type path))
                      (log/debugf "Received raw client state event %s" keeper-state)
@@ -135,7 +136,7 @@
                      (log/debugf "Event processing closed for %s" (str this))
                      (async/put! client-events [::closed (swap! client-atom (fn [client] (when client (.close client timeout)) nil))]))))]
         (log/debugf "Event processing opened for %s" (str this))
-        (reify Closeable (close [_] (async/put! commands ::close) (async/<!! rc))))))
+        (reify Closeable (close [_] (async/close! raw-client-events) (async/<!! rc))))))
   (connected? [this] (when-let [client @client-atom]
                        (when (= :CONNECTED (some-> client .getState .toString keyword))
                          client)))
@@ -213,12 +214,7 @@
                                        server))
                              "<No Raw Client>"))))
 
-(defn create
-  []
-  {:pre []}
-  (let [client-events (async/chan 1)
-        commands (async/chan 1 (filter #{::close}))]
-    (->ZClient commands (atom nil) client-events (async/mult client-events))))
+(defn create [] (->ZClient (atom nil) (async/mult (async/chan 1))))
 
 (defmacro with-awaited-open-connection
   [zclient connect-string timeout & body]
