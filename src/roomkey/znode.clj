@@ -112,7 +112,6 @@
   version is identical to `current-version`. Returns true if set happened, else false")
   (watch [this] "Recursively watch the znode and its children, returning a WatchManager that can be closed to cease watching, read from to
  get the results of watching and, as seq'd, to obtain the WatchManagers of its children")
-  (actualize! [this wmgr] "Recursively persist this ZNode, informing the watch manager of relevant events")
   (signature [this] "Return a (Clojure) hash equivalent to a signature of the state of the subtree at this ZNode"))
 
 (defprotocol VirtualNode
@@ -159,16 +158,6 @@
     (async/close! c)
     nil))
 
-(deftype WatchManager [input output child-watch-managers]
-  impl/WritePort
-  (put! [port val fn1-handler] (impl/put! input val fn1-handler))
-
-  Closeable
-  (close [this] (async/close! input) (async/<!! output))
-
-  clojure.lang.Seqable
-  (seq [this] (seq child-watch-managers)))
-
 (deftype ZNode [client path stat value children events]
   VirtualNode
   (overlay [this v]
@@ -205,6 +194,11 @@
       (async/pipe exists-events events false)
       ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
       ;; https://www.safaribooksonline.com/library/view/zookeeper/9781449361297/ch04.html
+      (async/>!! events {::type ::watch-start})
+      (zclient/with-connection handle-connection-loss
+        (if-let [stat (zclient/exists client path {:watcher watcher})]
+          (async/>!! exists-events {::type ::exists ::stat stat})
+          (create! this)))
       (let [cwms (reduce (fn [cwms child] (assoc cwms child (watch child))) {} @children)
             rc (async/go-loop [cwms cwms]
                  (if-let [{:keys [event-type keeper-state] :as event} (async/<! znode-events)]
@@ -234,9 +228,7 @@
                                                                  (as-> cwms cwms
                                                                    (reduce (fn [cwms child]
                                                                              (log/debugf "Processed insert for %s" (str child))
-                                                                             (let [wmgr (watch child)]
-                                                                               (async/>!! wmgr {:event-type ::Boot})
-                                                                               (assoc cwms child wmgr))) cwms child-adds)
+                                                                             (assoc cwms child (watch child))) cwms child-adds)
                                                                    (reduce (fn [cwms child]
                                                                              (log/debugf "Processed remove for %s" (str child))
                                                                              (.close (cwms child))
@@ -252,15 +244,8 @@
                        (let [n (transduce (map (fn [wmgr] (.close wmgr))) + 1 (vals cwms))]
                          (log/tracef "The event channel closed with %d nodes seen; shutting down %s" n (str this))
                          n))))]
-        (async/>!! events {::type ::watch-start})
-        (->WatchManager znode-events rc cwms))))
-  (actualize! [this wmgr]
-    (if-let [stat' (zclient/exists client path {:watcher (partial async/put! wmgr)})]
-      (dosync (ref-set stat (process-stat* stat')))
-      (create! this))
-    (doseq [[child cwmgr] (seq wmgr)] (actualize! child cwmgr))
-    (async/>!! wmgr {:event-type ::Boot})
-    wmgr)
+        (async/>!! znode-events {:event-type ::Boot})
+        (reify Closeable (close [this] (async/close! znode-events) (async/<!! rc))))))
   (compare-version-and-set! [this version value]
     (let [data [value (meta value)]
           stat' (zclient/set-data client path (*serialize* data) version {})]
@@ -372,9 +357,7 @@
              (if-let [[event client] (async/<! tap)]
                (do (log/debugf "Root client event %s (%s)" event wmgr)
                    (case event
-                     ::zclient/connected (recur (or wmgr (let [wmgr (watch root)] ; At startup and following session expiration
-                                                           (zclient/with-connection e-handler (actualize! root wmgr))
-                                                           wmgr)))
+                     ::zclient/connected (recur (or wmgr (watch root))) ; At startup and following session expiration
                      ::zclient/expired (do (.close wmgr) (recur nil))
                      ::zclient/closed (if wmgr (.close wmgr) 0) ; failed connections start but don't connect before closing?
                      (recur wmgr)))
