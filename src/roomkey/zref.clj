@@ -68,6 +68,7 @@
       r))
   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
   ;; https://www.safaribooksonline.com/library/view/zookeeper/9781449361297/ch04.html
+  ;; http://www.javadoc.io/doc/org.clojure/clojure/1.10.0
 
   VersionedReference
   (compareVersionAndSet [this current-version newval]

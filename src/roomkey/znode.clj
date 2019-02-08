@@ -365,7 +365,7 @@
   [root & args]
   (let [client (.client root)
         e-handler (fn [e type]
-                    (log/warnf "Unrecoverable client error (%s) watching/actualizing drcfg znode tree, aborting." type)
+                    (log/warnf "Unrecoverable client error (%s) actualizing drcfg znode tree, aborting." type)
                     nil)
         tap (async/tap client (async/chan 2))
         rc (async/go-loop [wmgr nil] ; start event listener loop
