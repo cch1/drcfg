@@ -349,7 +349,7 @@
                          (.close zclient-handle)
                          (async/close! tap)
                          (let [n (async/<!! rc)]
-                           (log/infof "The client event channel closed with %d nodes seen, shutting down %s" n (str root))
+                           (log/debugf "The client event channel closed with %d nodes seen, shutting down %s" n (str root))
                            n))))))
 
 (defmacro with-connection

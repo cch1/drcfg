@@ -74,7 +74,7 @@
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])
             (.stop $t0)
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/disconnected (partial instance? ZooKeeper)])])
-            (log/info ">>>>>>>>>> About to start a new server -should trigger expiration of existing sessions <<<<<<")
+            (log/debug ">>>>>>>>>> About to start a new server -should trigger expiration of existing sessions <<<<<<")
             (.start $t1)
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/expired (partial instance? ZooKeeper)])])))))
 
