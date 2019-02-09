@@ -92,7 +92,7 @@
   "An unhygenic macro that captures `this` and `path` & binds `client` to manage connection issues"
   [& body]
   (let [emessage "Lost connection while processing ZooKeeper requests"]
-    `(try (if-let [~'client (.connected? ~'this)]
+    `(try (if-let [~'client ^ZooKeeper (.connected? ~'this)]
             (with-retries (fn [] ~@body))
             (throw (ex-info "Client unavailable while processing ZooKeeper requests" {::path ~'path ::type ::unavailable})))
           (catch KeeperException$SessionExpiredException e# ; watches are deleted on session expiration
@@ -115,8 +115,9 @@
     (assert (nil? @client-atom) "Must close current connection before opeing a new connection!")
     (let [client-events (async/muxch* mux)
           raw-client-events (async/chan 1 (map event-to-map))
-          client-watcher (make-watcher (partial async/put! raw-client-events))]
-      (reset! client-atom (ZooKeeper. connect-string timeout client-watcher true))
+          ^Watcher client-watcher (make-watcher (partial async/put! raw-client-events))
+          new-client (fn [] (ZooKeeper. ^String connect-string ^int timeout client-watcher true))]
+      (reset! client-atom (new-client))
       (async/put! client-events [::started @client-atom])
       (let [rc (async/go-loop [] ; https://zookeeper.apache.org/doc/r3.5.4-beta/zookeeperProgrammers.html#ch_zkSessions
                  (if-let [{:keys [event-type keeper-state path] :as event} (async/<! raw-client-events)]
@@ -126,7 +127,7 @@
                      (case keeper-state
                        :SyncConnected (async/put! client-events [::connected @client-atom])
                        :Disconnected (async/put! client-events [::disconnected @client-atom])
-                       :Expired (let [z' (ZooKeeper. connect-string timeout client-watcher true)]
+                       :Expired (let [z' (new-client)]
                                   ;; Do we need to close the old client?
                                   (async/put! client-events [::expired @client-atom])
                                   (swap! client-atom (constantly z'))
@@ -136,55 +137,45 @@
                      (recur))
                    (do
                      (log/debugf "Event processing closed for %s" (str this))
-                     (async/put! client-events [::closed (swap! client-atom (fn [client] (when client (.close client timeout)) nil))]))))]
+                     (async/put! client-events [::closed (swap! client-atom (fn [client] (when client (.close ^ZooKeeper client timeout)) nil))]))))]
         (log/debugf "Event processing opened for %s" (str this))
         (reify Closeable (close [_] (async/close! raw-client-events) (async/<!! rc))))))
-  (connected? [this] (when-let [client @client-atom]
+  (connected? [this] (when-let [client ^ZooKeeper @client-atom]
                        (when (= :CONNECTED (some-> client .getState .toString keyword))
                          client)))
   ZooKeeperFacing
-  (delete [this path version {:keys [async? callback context]
-                              :or {async? false
-                                   context path}}]
-    (with-client (.delete client path version))
+  (delete [this path version {:keys [] :or {}}]
+    (with-client ^void (.delete client path version))
     true)
-  (create-znode [this path {:keys [data acl persistent? sequential? context callback async?]
-                            :or {persistent? false
-                                 sequential? false
-                                 acl (acls :open-acl-unsafe)
-                                 context path
-                                 async? false}}]
+  (create-znode [this path {:keys [data acl persistent? sequential?]
+                            :or {persistent? false sequential? false acl (acls :open-acl-unsafe)}}]
     (let [stat (Stat.)
           create-mode (create-modes {:persistent? persistent?, :sequential? sequential?})]
-      (try (with-client (.create client path data acl create-mode))
+      (try (with-client ^void (.create client path data acl create-mode))
            (catch KeeperException$NodeExistsException e
              false))))
-  (data [this path {:keys [watcher watch? async? callback context]
-                    :or {watch? false
-                         async? false
-                         context path}}]
-    (let [stat (Stat.)]
-      {:data (with-client (.getData client path (if watcher (make-watcher (comp watcher event-to-map)) watch?) stat))
-       :stat (stat-to-map stat)}))
-  (set-data [this path data version {:keys [async? callback context]
-                                     :or {async? false
-                                          context path}}]
+  (set-data [this path data version {:keys [] :or {}}]
     (try (stat-to-map (with-client (.setData client path data version)))
          (catch KeeperException e
            (when-not (= (.code e) KeeperException$Code/BADVERSION) (throw e)))))
-  (children [this path {:keys [watcher watch? async? callback context sort?]
-                        :or {watch? false
-                             async? false
-                             context path}}]
+  (data [this path {:keys [watcher watch?] :or {watch? false}}]
     (let [stat (Stat.)]
-      {:paths (into () (with-client (.getChildren client path (if watcher (make-watcher (comp watcher event-to-map)) watch?) stat)))
+      {:data (with-client ^bytes (if watcher
+                                   (.getData client ^String path (make-watcher (comp watcher event-to-map)) stat)
+                                   (.getData client ^String path ^boolean watch? stat)))
        :stat (stat-to-map stat)}))
-  (exists [this path {:keys [watcher watch? async? callback context]
-                      :or {watch? false
-                           async? false
-                           context path}}]
-    (when-let [stat (with-client (.exists client path (if watcher (make-watcher (comp watcher event-to-map)) watch?)))]
-      (stat-to-map stat)))
+  (children [this path {:keys [watcher watch?] :or {watch? false}}]
+    (let [stat (Stat.)]
+      {:paths (into () (with-client ^java.util.List (if watcher
+                                                      (.getChildren client ^String path (make-watcher (comp watcher event-to-map)) stat)
+                                                      (.getChildren client ^String path ^boolean watch? stat))))
+       :stat (stat-to-map stat)}))
+  (exists [this path {:keys [watcher watch?] :or {watch? false}}]
+    (let [w (if watcher  watch?)]
+      (when-let [stat (with-client ^Stat (if watcher
+                                           (.exists client ^String path (make-watcher (comp watcher event-to-map)))
+                                           (.exists client ^String path ^boolean watch?)))]
+        (stat-to-map stat))))
 
   clojure.core.async.Mult
   (tap* [m ch close?] (async/tap* mux ch close?))
@@ -204,7 +195,7 @@
   (toString [this] (format "%s: %s"
                            (.. this (getClass) (getSimpleName))
                            (if-let [client @client-atom]
-                             (let [server (last (re-find #"remoteserver:(\S+)" (.toString client))) ; FIXME: get the remote server cleanly
+                             (let [server (last (re-find #"remoteserver:(\S+)" (.toString ^ZooKeeper client))) ; FIXME: get the remote server cleanly
                                    b (bean client)]
                                (format "ZooKeeper@%08x State:%s sessionId:0x%15x server:%s"
                                        (System/identityHashCode client)
