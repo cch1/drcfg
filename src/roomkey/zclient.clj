@@ -8,7 +8,8 @@
             KeeperException$ConnectionLossException
             KeeperException$NodeExistsException
             ZooDefs$Ids
-            data.Stat])
+            data.Stat]
+           (java.time Instant OffsetDateTime))
   (:require [clojure.string :as string]
             [clojure.core.async :as async]
             [clojure.tools.logging :as log]))
@@ -31,19 +32,20 @@
 
 (defn- stat-to-map
   ([^Stat stat]
+   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_timeInZk
    ;;(long czxid, long mzxid, long ctime, long mtime, int version, int cversion, int aversion, long ephemeralOwner, int dataLength, int numChildren, long pzxid)
    (when stat
      {:czxid (.getCzxid stat)
       :mzxid (.getMzxid stat)
-      :ctime (.getCtime stat)
-      :mtime (.getMtime stat)
+      :pzxid (.getPzxid stat)
+      :ctime (Instant/ofEpochMilli (.getCtime stat))
+      :mtime (Instant/ofEpochMilli (.getMtime stat))
       :version (.getVersion stat)
       :cversion (.getCversion stat)
       :aversion (.getAversion stat)
       :ephemeralOwner (.getEphemeralOwner stat)
       :dataLength (.getDataLength stat)
-      :numChildren (.getNumChildren stat)
-      :pzxid (.getPzxid stat)})))
+      :numChildren (.getNumChildren stat)})))
 
 (defn- event-to-map
   [^WatchedEvent event]

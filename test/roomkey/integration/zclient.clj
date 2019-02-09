@@ -50,7 +50,7 @@
           (exists $client "/myznode" {}) => (contains {:version 0})
           (exists $client "/notmyznode" {}) => falsey
           (data $client "/myznode" {}) => (just {:data (bytes-of "Hello World") :stat (contains {:version 0})})
-          (set-data $client "/myznode" (.getBytes "foo") 0 {}) => (contains {:version 1})
+          (set-data $client "/myznode" (.getBytes "foo") 0 {}) => (contains {:version 1 :mtime (partial instance? java.time.Instant)})
           (set-data $client "/myznode" (.getBytes "foo") 0 {}) => nil
           (Thread/sleep 20)
           (children $client "/myznode" {}) => (just {:paths (one-of string?) :stat map?})

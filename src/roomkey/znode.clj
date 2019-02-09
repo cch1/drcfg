@@ -6,7 +6,7 @@
             [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as impl]
             [clojure.tools.logging :as log])
-  (:import (java.time Instant OffsetDateTime)))
+  (:import (java.time Instant)))
 
 ;; TODO: Support (de)serialization to a vector of [value metadata]
 (defn ^:dynamic *deserialize* [b] {:pre [(instance? (Class/forName "[B") b)]} (read-string (String. b "UTF-8")))
@@ -14,16 +14,6 @@
 (defn ^:dynamic *serialize* [obj] {:post [(instance? (Class/forName "[B") %)]} (.getBytes (binding [*print-dup* true] (pr-str obj))))
 
 (defn- normalize-datum [{:keys [stat data]}] {::type ::datum ::value data ::stat stat})
-
-(defn- process-stat*
-  "Process stat structure into useful data"
-  ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_timeInZk
-  [stat]
-  (-> stat
-      (update :ctime #(Instant/ofEpochMilli %))
-      (update :mtime #(Instant/ofEpochMilli %))))
-
-(defn- process-stat [zdata] (update zdata ::stat process-stat*))
 
 (defn- deserialize-data
   "Process raw zdata into usefully deserialized types and structure"
@@ -87,7 +77,6 @@
 (defn- zdata-xform
   [znode]
   (comp (map normalize-datum)
-        (map process-stat)
         (map (partial deserialize-data znode))
         (map decode-datum)
         (tap-datum znode)))
@@ -184,8 +173,8 @@
           znode-events (async/chan 10 identity handle-channel-error)
           data-events (async/chan (async/sliding-buffer 4) (zdata-xform this) handle-channel-error)
           delete-events (async/chan 1 (dedupe) handle-channel-error) ; why won't a promise channel work here?
-          children-events (async/chan 10 (comp (map process-stat) (tap-children this)) handle-channel-error)
-          exists-events (async/chan 1 (comp (map process-stat) (tap-stat this)) handle-channel-error)
+          children-events (async/chan 10 (tap-children this) handle-channel-error)
+          exists-events (async/chan 1 (tap-stat this) handle-channel-error)
           handle-connection-loss (make-connection-loss-handler this znode-events)
           watcher (partial async/put! znode-events)]
       (async/pipe data-events events false)
@@ -247,7 +236,7 @@
           stat' (zclient/set-data client path (*serialize* data) version {})]
       (when stat'
         (log/debugf "Set value for %s @ %s" (str this) version)
-        (dosync (ref-set stat (process-stat* stat'))))
+        (dosync (ref-set stat stat')))
       (boolean stat')))
   (signature [this] (dosync
                      (transduce (map signature)
