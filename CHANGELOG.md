@@ -1,5 +1,7 @@
 ## Version 6.2.0
 * Add clojure.lang.IFn support on ZClient.
+* Overhaul ZNode startup and boot process.
+* Refactor for performance, simplicity.
 
 ## Version 6.1.0
 * Overhaul open and close to squash out race conditions
