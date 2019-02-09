@@ -345,9 +345,6 @@
   "Open a ZooKeeper client connection and watch for client status changes to manage watches on `root` and its descendants"
   [root & args]
   (let [client (.client root)
-        e-handler (fn [e type]
-                    (log/warnf "Unrecoverable client error (%s) actualizing drcfg znode tree, aborting." type)
-                    nil)
         tap (async/tap client (async/chan 2))
         rc (async/go-loop [wmgr nil] ; start event listener loop
              (if-let [[event client] (async/<! tap)]
