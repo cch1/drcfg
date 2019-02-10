@@ -6,12 +6,14 @@
             [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as impl]
             [clojure.tools.logging :as log])
-  (:import (java.time Instant)))
+  (:import (java.time Instant)
+           (org.apache.zookeeper ZooKeeper Watcher WatchedEvent
+                                 data.Stat)))
 
 ;; TODO: Support (de)serialization to a vector of [value metadata]
-(defn ^:dynamic *deserialize* [b] {:pre [(instance? (Class/forName "[B") b)]} (read-string (String. b "UTF-8")))
+(defn ^:dynamic *deserialize* [^bytes b] {:pre [(instance? (Class/forName "[B") b)]} (read-string (String. b "UTF-8")))
 
-(defn ^:dynamic *serialize* [obj] {:post [(instance? (Class/forName "[B") %)]} (.getBytes (binding [*print-dup* true] (pr-str obj))))
+(defn ^:dynamic *serialize* [^Object obj] {:post [(instance? (Class/forName "[B") %)]} (binding [*print-dup* true] (.getBytes ^String (pr-str obj))))
 
 (defn- normalize-datum [{:keys [stat data]}] {::type ::datum ::value data ::stat stat})
 
@@ -33,46 +35,7 @@
                               (if (instance? clojure.lang.IMeta value) (with-meta value metadata) value)))
       zdata)))
 
-(defn- tap-children
-  [node]
-  (let [stat-ref (.stat node)
-        children-ref (.children node)]
-    (fn [rf]
-      (fn
-        ([] (rf))
-        ([result] (rf result))
-        ([result {:keys [roomkey.znode/inserted roomkey.znode/removed roomkey.znode/stat] :as input}]
-         (dosync
-          (ref-set stat-ref stat)
-          (apply alter children-ref conj inserted)
-          (apply alter children-ref disj removed))
-         (rf result input))))))
-
-(defn- tap-datum
-  [node]
-  (let [stat-ref (.stat node)
-        value-ref (.value node)]
-    (fn [rf]
-      (fn
-        ([] (rf))
-        ([result] (rf result))
-        ([result {:keys [roomkey.znode/value roomkey.znode/stat] :as input}]
-         (dosync
-          (ref-set stat-ref stat)
-          (ref-set value-ref  value))
-         (rf result input))))))
-
-(defn- tap-stat
-  [node]
-  (let [stat-ref (.stat node)]
-    (fn [rf]
-      (fn
-        ([] (rf))
-        ([result] (rf result))
-        ([result {:keys [roomkey.znode/stat] :as input}]
-         (dosync
-          (ref-set stat-ref stat))
-         (rf result input))))))
+(declare tap-children tap-datum tap-stat process-children-changes)
 
 (defn- zdata-xform
   [znode]
@@ -119,19 +82,6 @@
    (let [events (async/chan (async/sliding-buffer 4))]
      (->ZNode client path (ref {:version -1 :cversion -1 :aversion -1}) (ref value) (ref #{}) events))))
 
-(defn- process-children-changes
-  "Atomically update the `children` reference from `parent` with the `paths` ensuring adds and deletes are processed exactly once"
-  ;; NB The implied node changes have already been persisted (created and deleted) -here we manage the proxy data and associated processing
-  ;; TODO: https://tech.grammarly.com/blog/building-etl-pipelines-with-clojure
-  [parent childs paths]
-  (let [path-prefix (as-> (str (.path parent) "/") s (if (= s "//") "/" s))
-        childs' (into #{} (comp (map (fn [segment] (str path-prefix segment)))
-                                (map (fn [path] (or (some #(when (= path (.path %)) %) @(.children parent))
-                                                    (default (.client parent) path))))) paths)]
-    (let [child-adds (set/difference childs' childs)
-          child-dels (set/difference childs childs')]
-      [child-adds child-dels])))
-
 ;; http://insideclojure.org/2016/03/16/collections/
 ;; http://spootnik.org/entries/2014/11/06/playing-with-clojure-core-interfaces/index.html
 ;; https://clojure.github.io/data.priority-map//index.html
@@ -147,7 +97,7 @@
     (async/close! c)
     nil))
 
-(deftype ZNode [client path stat value children events]
+(deftype ZNode [^roomkey.zclient.ZClient client ^String path ^Stat stat value children events]
   VirtualNode
   (overlay [this v]
     ;; This should be safe, but it is a (Clojure) code smell.  It could possibly be avoided through rewriting of the ZNode tree.
@@ -155,7 +105,7 @@
     this)
   (update-or-add-child [this path v]
     (let [z' (default client path v)]
-      (.get (conj! this z') z')))
+      (.get ^clojure.lang.ITransientSet (conj! this z') z')))
 
   BackedZNode
   (create! [this] ; Synchronously create the node @ version zero, if not already present
@@ -215,17 +165,17 @@
                                                                              (assoc cwms child (watch child))) cwms child-adds)
                                                                    (reduce (fn [cwms child]
                                                                              (log/debugf "Processed remove for %s" (str child))
-                                                                             (.close (cwms child))
+                                                                             (.close ^roomkey.znode.Closeable (cwms child))
                                                                              (dissoc cwms child)) cwms child-dels))))))
                                      (do (log/warnf "Unexpected znode event:state [%s:%s] while watching %s" event-type keeper-state (str this))
                                          cwms))]
                        (recur cwms)
                        (do (async/>! events {::type ::watch-stop})
-                           (let [n (transduce (map (fn [wmgr] (.close wmgr))) + 1 (vals cwms))]
+                           (let [n (transduce (map (fn [wmgr] (.close ^roomkey.znode.Closeable wmgr))) + 1 (vals cwms))]
                              (log/warnf "The event channel closed abruptly with %d nodes seen; shutting down %s" n (str this))
                              n))))
                    (do (async/>! events {::type ::watch-stop})
-                       (let [n (transduce (map (fn [wmgr] (.close wmgr))) + 1 (vals cwms))]
+                       (let [n (transduce (map (fn [wmgr] (.close ^roomkey.znode.Closeable wmgr))) + 1 (vals cwms))]
                          (log/tracef "The event channel closed with %d nodes seen; shutting down %s" n (str this))
                          n))))]
         (async/>!! znode-events {:event-type :NodeDataChanged})
@@ -272,13 +222,13 @@
     (get @children v))
 
   java.lang.Comparable
-  (compareTo [this other-znode] (.compareTo path (.path other-znode)))
+  (compareTo [this other-znode] (.compareTo path (.path ^ZNode other-znode)))
 
   clojure.lang.IFn
   (invoke [this p] (if-let [[_ head tail] (re-matches #"(/[^/]+)(.*)" p)]
                      (let [abs-path (as-> (str path head) s
                                       (if (.startsWith s "//") (.substring s 1) s))]
-                       (when-let [child (some #(when (= (.path %) abs-path) %) @children)]
+                       (when-let [child (some (fn [^ZNode node] (when (= (.path node) abs-path) node)) @children)]
                          (child tail)))
                      this))
   (applyTo [this args]
@@ -313,14 +263,68 @@
   (close! [this] (impl/close! events))
 
   java.lang.Object
-  (equals [this other] (and (= (class this) (class other)) (= (.path this) (.path other)) (= (.client this) (.client other))))
+  (equals [this other] (and (= (class this) (class other)) (= (.path this) (.path ^ZNode other)) (= (.client this) (.client ^ZNode other))))
   (hashCode [this] (.hashCode [path client]))
   (toString [this] (format "%s: %s" (.. this (getClass) (getSimpleName)) path)))
+
+(defn- tap-children
+  [^roomkey.znode.ZNode node]
+  (let [stat-ref (.stat node)
+        children-ref (.children node)]
+    (fn [rf]
+      (fn
+        ([] (rf))
+        ([result] (rf result))
+        ([result {:keys [roomkey.znode/inserted roomkey.znode/removed roomkey.znode/stat] :as input}]
+         (dosync
+          (ref-set stat-ref stat)
+          (apply alter children-ref conj inserted)
+          (apply alter children-ref disj removed))
+         (rf result input))))))
+
+(defn- process-children-changes
+  "Atomically update the `children` reference from `parent` with the `paths` ensuring adds and deletes are processed exactly once"
+  ;; NB The implied node changes have already been persisted (created and deleted) -here we manage the proxy data and associated processing
+  ;; TODO: https://tech.grammarly.com/blog/building-etl-pipelines-with-clojure
+  [^roomkey.znode.ZNode parent childs paths]
+  (let [path-prefix (as-> (str (.path parent) "/") s (if (= s "//") "/" s))
+        childs' (into #{} (comp (map (fn [segment] (str path-prefix segment)))
+                                (map (fn [path] (or (some #(when (= path (.path ^roomkey.znode.ZNode %)) %) @(.children parent))
+                                                    (default (.client parent) path))))) paths)]
+    (let [child-adds (set/difference childs' childs)
+          child-dels (set/difference childs childs')]
+      [child-adds child-dels])))
+
+(defn- tap-datum
+  [^roomkey.znode.ZNode node]
+  (let [stat-ref (.stat node)
+        value-ref (.value node)]
+    (fn [rf]
+      (fn
+        ([] (rf))
+        ([result] (rf result))
+        ([result {:keys [roomkey.znode/value roomkey.znode/stat] :as input}]
+         (dosync
+          (ref-set stat-ref stat)
+          (ref-set value-ref  value))
+         (rf result input))))))
+
+(defn- tap-stat
+  [^roomkey.znode.ZNode node]
+  (let [stat-ref (.stat node)]
+    (fn [rf]
+      (fn
+        ([] (rf))
+        ([result] (rf result))
+        ([result {:keys [roomkey.znode/stat] :as input}]
+         (dosync
+          (ref-set stat-ref stat))
+         (rf result input))))))
 
 (defn add-descendant
   "Add a descendant ZNode to the given parent's (sub)tree `root` ZNode at the given (relative) `path` carrying the given `value`
   creating placeholder intermediate nodes as required."
-  [parent path value]
+  [^roomkey.znode.ZNode parent path value]
   {:pre [(re-matches #"/.*" path)]}
   (if-let [[_ head tail] (re-matches #"(/[^/]+)(.*)" path)]
     (let [abs-path (as-> (str (.path parent) head) s
@@ -332,10 +336,10 @@
 
 (defn open
   "Open a ZooKeeper client connection and watch for client status changes to manage watches on `root` and its descendants"
-  [root & args]
+  [^roomkey.znode.ZNode root & args]
   (let [client (.client root)
         tap (async/tap client (async/chan 2))
-        rc (async/go-loop [wmgr nil] ; start event listener loop
+        rc (async/go-loop [^roomkey.znode.Closeable wmgr nil] ; start event listener loop
              (if-let [[event client] (async/<! tap)]
                (do (log/debugf "Root client event %s (%s)" event wmgr)
                    (case event
@@ -346,7 +350,7 @@
                (if wmgr (.close wmgr) 0)))]
     (let [zclient-handle (apply zclient/open client args)]
       (reify Closeable (close [_]
-                         (.close zclient-handle)
+                         (.close ^roomkey.zclient.Closeable zclient-handle)
                          (async/close! tap)
                          (let [n (async/<!! rc)]
                            (log/debugf "The client event channel closed with %d nodes seen, shutting down %s" n (str root))
@@ -380,10 +384,10 @@
 ;; https://stackoverflow.com/questions/15179515/pretty-printing-a-record-using-a-custom-method-in-clojure
 (remove-method clojure.core/print-method roomkey.znode.ZNode)
 (defmethod clojure.core/print-method ZNode
-  [znode ^java.io.Writer writer]
+  [^roomkey.znode.ZNode znode ^java.io.Writer writer]
   (.write writer (format "#<%s %s>" (.. znode (getClass) (getSimpleName)) (.path znode))))
 
 (remove-method clojure.pprint/simple-dispatch ZNode)
 (defmethod clojure.pprint/simple-dispatch ZNode
-  [znode]
+  [^roomkey.znode.ZNode znode]
   (pr znode))
