@@ -38,7 +38,7 @@
   (comp (filter (comp #{:roomkey.znode/datum} :roomkey.znode/type))
         (map (fn [{:keys [roomkey.znode/value roomkey.znode/stat]}] [value stat]))))
 
-(deftype ZRef [znode cache validator watches]
+(deftype ZRef [^roomkey.znode.ZNode znode cache validator watches]
   ZNodeWatching
   (path [this] (.path znode))
   (start [this]
@@ -114,14 +114,14 @@
   (swap [this f x y] (.swap this (fn [v] (f v x y))))
   (swap [this f x y args] (.swap this (fn [v] (apply f v x y args))))
   java.lang.Object
-  (toString [this] (format "%s: %s [version %d]" (.getName (class this)) (.path znode) (last (.vDeref this)))))
+  (toString [this] (format "%s: %s [version %d]" (.getName (class this)) (.path ^roomkey.znode.ZNode znode) (last (.vDeref this)))))
 
 (defn create
   [root-znode path default & options]
   (let [{validator :validator} (apply hash-map options)
         znode (znode/add-descendant root-znode path default)
-        z (->ZRef znode (atom [default {:version -1}])
-                  (atom nil) (atom {}))]
+        z ^roomkey.zref.ZRef (->ZRef znode (atom [default {:version -1}])
+                                     (atom nil) (atom {}))]
     (when validator (.setValidator z validator))
     (start z)
     z))
@@ -130,7 +130,7 @@
 
 (defn versioned-deref
   "Return the current state (value and version) of the zref `z`."
-  [z]
+  [^roomkey.zref.ZRef z]
   {:pre [(instance? roomkey.zref.ZRef z)]}
   (.vDeref z))
 
@@ -138,7 +138,7 @@
   "Atomically sets the value of z to `newval` if and only if the current
   version of `z` is identical to `current-version`. Returns true if set
   happened, else false"
-  [z current-version newval]
+  [^roomkey.zref.ZRef z current-version newval]
   {:pre [(instance? roomkey.zref.ZRef z) (integer? current-version)]}
   (.compareVersionAndSet z current-version newval))
 
@@ -152,10 +152,10 @@
   simultaneously.  Keys must be unique per zref, and can be used to remove
   the watch with `remove-watch`, but are otherwise considered opaque
   by the watch mechanism."
-  [z k f]
+  [^roomkey.zref.ZRef z k f]
   {:pre [(instance? roomkey.zref.ZRef z) (fn? f)]}
   (.vAddWatch z k f))
 
 (defmethod clojure.core/print-method ZRef
-  [zref ^java.io.Writer writer]
+  [^roomkey.zref.ZRef zref ^java.io.Writer writer]
   (.write writer (format "#<ZRef\"%s\" Version %d>" (.path zref) (last (.vDeref zref)))))
