@@ -34,7 +34,7 @@
                                               (map :roomkey.znode/type)))
                           false)
          root (if scope (znode/add-descendant drcfg-root (str "/" scope) ::scoped-root) drcfg-root)]
-     (with-open [zclient (znode/open drcfg-root connect-string timeout)]
+     (with-open [^roomkey.znode.Closeable zclient (znode/open drcfg-root connect-string timeout)]
        (when-let [result (async/<!! (async/go-loop []
                                       (async/alt! data ([event] (case event
                                                                   :roomkey.znode/created! (do (log/infof "Database initialized") (recur))
