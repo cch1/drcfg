@@ -26,4 +26,6 @@
                                   [org.slf4j/jcl-over-slf4j "1.7.25"]
                                   [org.slf4j/slf4j-log4j12 "1.7.25"]
                                   [log4j/log4j "1.2.17"]]}
-             :test {:resource-paths ["test-resources"]}})
+             :test {:resource-paths ["test-resources"]
+                    :global-vars {*warn-on-reflection* true}}
+             :reflection {:global-vars {*warn-on-reflection* true}}})

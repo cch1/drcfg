@@ -140,8 +140,7 @@
         (.toString $c) => #"ZClient: <No Raw Client>"))
 
 (fact "Client support IFn"
-      (let [
-            $c (create)]
+      (let [$c (create)]
         (with-open [_ ($c $cstring0 5000)]
           (async/<!! (async/tap $c (async/chan 1))) => (just [:roomkey.zclient/connected (partial instance? ZooKeeper)])
           (connected? $c) => truthy)))
