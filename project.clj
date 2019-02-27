@@ -22,9 +22,9 @@
   :profiles {:dev {:dependencies [[midje "1.9.6"]
                                   [zookeeper-clj "0.9.4" :exclusions [org.apache.zookeeper/zookeeper commons-codec]]
                                   [org.apache.curator/curator-test "4.1.0"]
-                                  [org.slf4j/slf4j-api "1.7.25"]
-                                  [org.slf4j/jcl-over-slf4j "1.7.25"]
-                                  [org.slf4j/slf4j-log4j12 "1.7.25"]
+                                  [org.slf4j/slf4j-api "1.7.26"]
+                                  [org.slf4j/jcl-over-slf4j "1.7.26"]
+                                  [org.slf4j/slf4j-log4j12 "1.7.26"]
                                   [log4j/log4j "1.2.17"]]}
              :test {:resource-paths ["test-resources"]
                     :global-vars {*warn-on-reflection* true}}
