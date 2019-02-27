@@ -6,9 +6,7 @@
             [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as impl]
             [clojure.tools.logging :as log])
-  (:import (java.time Instant)
-           (org.apache.zookeeper ZooKeeper Watcher WatchedEvent
-                                 data.Stat)))
+  (:import (java.time Instant)))
 
 ;; TODO: Support (de)serialization to a vector of [value metadata]
 (defn ^:dynamic *deserialize* [^bytes b] {:pre [(instance? (Class/forName "[B") b)]} (read-string (String. b "UTF-8")))
@@ -97,7 +95,7 @@
     (async/close! c)
     nil))
 
-(deftype ZNode [^roomkey.zclient.ZClient client ^String path ^Stat stat value children events]
+(deftype ZNode [^roomkey.zclient.ZClient client ^String path stat value children events]
   VirtualNode
   (overlay [this v]
     ;; This should be safe, but it is a (Clojure) code smell.  It could possibly be avoided through rewriting of the ZNode tree.
