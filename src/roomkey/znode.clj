@@ -99,7 +99,12 @@
   VirtualNode
   (overlay [this v]
     ;; This should be safe, but it is a (Clojure) code smell.  It could possibly be avoided through rewriting of the ZNode tree.
-    (dosync (alter value (fn [old-v] (if (not= old-v v) (do (assert (= old-v ::placeholder) "Can't overwrite existing child") v) old-v))))
+    (dosync (alter value (fn [old-v]
+                           (if (not= old-v v)
+                             (if (-> stat deref :version pos?)
+                               (do (log/warnf "Refusing to overwrite cluster-synchronized value at %s" (str this)) old-v)
+                               (do (assert (= old-v ::placeholder) (format "Can't overwrite existing node at %s" (str this))) v))
+                             old-v))))
     this)
   (update-or-add-child [this path v]
     (let [z' (default client path v)]
