@@ -22,7 +22,7 @@
   :jvm-opts ["-Djava.io.tmpdir=./tmp"]
   :profiles {:dev {:dependencies [[midje "1.9.6"]
                                   [zookeeper-clj "0.9.4" :exclusions [org.apache.zookeeper/zookeeper commons-codec]]
-                                  [org.apache.curator/curator-test "4.1.0"]
+                                  [org.apache.curator/curator-test "4.2.0"]
                                   [org.slf4j/slf4j-api "1.7.26"]
                                   [org.slf4j/jcl-over-slf4j "1.7.26"]
                                   [org.slf4j/slf4j-log4j12 "1.7.26"]
