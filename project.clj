@@ -16,6 +16,7 @@
   :dependencies [[org.clojure/clojure "1.10.0"]
                  [org.clojure/tools.logging "0.4.1"]
                  [org.clojure/core.async "0.4.490"]
+                 [org.clojure/tools.macro "0.1.5"]
                  [org.apache.zookeeper/zookeeper "3.5.4-beta" :exclusions [log4j]]]
   :repositories {"rk-maven" {:url "s3p://rk-maven/releases/" :no-auth true}}
   :jvm-opts ["-Djava.io.tmpdir=./tmp"]
