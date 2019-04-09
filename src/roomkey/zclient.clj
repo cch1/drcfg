@@ -151,7 +151,8 @@
                             :or {persistent? false sequential? false acl (acls :open-acl-unsafe)}}]
     (let [stat (Stat.)
           create-mode (create-modes {:persistent? persistent?, :sequential? sequential?})]
-      (try (with-client ^void (.create client path data acl create-mode))
+      (try (with-client ^void (.create client path data acl create-mode stat))
+           (stat-to-map stat)
            (catch KeeperException$NodeExistsException e
              false))))
   (set-data [this path data version {:keys [] :or {}}]

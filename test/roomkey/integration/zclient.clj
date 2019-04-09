@@ -37,6 +37,21 @@
           (async/<!! (async/tap $c events)) => (just [:roomkey.zclient/connected (partial instance? ZooKeeper)])
           (connected? $c) => truthy)))
 
+(defchecker stat? [expected]
+  ;; The key to chatty checkers is to have the useful intermediate results be the evaluation of arguments to top-level expressions!
+  (every-checker (contains {:version int?
+                            :cversion int?
+                            :aversion int?
+                            :ctime (partial instance? java.time.Instant)
+                            :mtime (partial instance? java.time.Instant)
+                            :mzxid pos-int?
+                            :czxid pos-int?
+                            :pzxid pos-int?
+                            :numChildren int?
+                            :ephemeralOwner int?
+                            :dataLength int?})
+                 (contains expected)))
+
 (fact "Client can perform operations on znodes"
       (let [test-server (TestingServer. true)
             c (async/chan 1)
@@ -45,7 +60,7 @@
         (with-open [_ (open $client (.getConnectString test-server) 5000)]
           c  => (eventually-streams 2 3000 (just [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])
                                                   (just [:roomkey.zclient/connected (partial instance? ZooKeeper)])]))
-          (create-znode $client "/myznode" {:data (.getBytes "Hello World") :persistent? true}) => truthy
+          (create-znode $client "/myznode" {:data (.getBytes "Hello World") :persistent? true}) => stat?
           (create-znode $client "/myznode/child" {}) => truthy
           (exists $client "/myznode" {}) => (contains {:version 0})
           (exists $client "/notmyznode" {}) => falsey

@@ -304,7 +304,7 @@
                                                       (just #::znode{:type ::znode/created!})
                                                       (contains #::znode{:type ::znode/datum :value 0})]))
           (let [$grandchild (add-descendant $root "/child/grandchild" (with-meta #{1 2 3} {:foo "bar"}))]
-            (create! $grandchild)
+            (create! $grandchild) => stat?
             $child => (eventually-streams 1 3000 (just [(just #::znode{:type ::znode/children-changed :inserted (just #{$grandchild})
                                                                        :removed #{} :stat (stat? {})})]))
             $grandchild => (eventually-streams 3 3000 (just [#::znode{:type ::znode/watch-start}

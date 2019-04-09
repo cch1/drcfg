@@ -113,9 +113,9 @@
   BackedZNode
   (create! [this] ; Synchronously create the node @ version zero, if not already present
     (let [data [@value (meta @value)]]
-      (when (zclient/create-znode client path {:persistent? true :data (*serialize* data)})
+      (when-let [stat (zclient/create-znode client path {:persistent? true :data (*serialize* data)})]
         (log/debugf "Created %s" (str this))
-        true)))
+        stat)))
   (delete! [this version]
     (zclient/delete client path version {})
     (log/debugf "Deleted %s" (str this))
