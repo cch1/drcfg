@@ -84,9 +84,9 @@
             $z2 (zref $root "/zref2" 1)]
         (with-awaited-connection $root
           $z0 => (eventually-vrefers-to 1000 ["A" 0])
-          (.compareVersionAndSet $z0 0 "B") => true
+          (.compareVersionAndSet $z0 0 "B") => truthy
           $z0 => (eventually-vrefers-to 1000 ["B" 1])
-          (.compareVersionAndSet $z0 12 "C") => false
+          (.compareVersionAndSet $z0 12 "C") => falsey
 
           $z1 => (eventually-vrefers-to 1000 ["A" 0])
           (compare-and-set! $z1 "Z" "B") => false

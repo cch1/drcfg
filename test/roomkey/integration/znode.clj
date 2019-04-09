@@ -74,7 +74,7 @@
                                                       (just #::znode{:type ::znode/created!})
                                                       (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})]))
           $child => (has-ref-state [(stat? {:version 0}) 0 empty?])
-          (compare-version-and-set! $child 0 1) => truthy
+          (compare-version-and-set! $child 0 1) => stat?
           $child => (eventually-streams 1 5000 (just [(just #::znode{:type ::znode/datum :value 1 :stat (stat? {:version 1})})])))
         $child => (has-ref-state [(stat? {:version 1}) 1 empty?])))
 

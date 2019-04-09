@@ -190,7 +190,7 @@
       (when stat'
         (log/debugf "Set value for %s @ %s" (str this) version)
         (dosync (ref-set stat stat')))
-      (boolean stat')))
+      stat'))
   (signature [this] (dosync
                      (transduce (map signature)
                                 (fn accumulate-independently-then-hash
