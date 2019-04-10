@@ -1,3 +1,16 @@
+## Version 6.4.0
+* Return stat data structures from `znode/create!` and `znode/compare-version-and-set!`.  This requires newish versions of Zookeeper.
+
+## Version 6.3.1
+* Add missing dependency on `org.clojure/tools.macro`
+
+## Version 6.3.0
+* Fix bad behavior that allowed sync'd ZNodes to be re-initialized with default values
+
+## Version 6.2.1
+* Add type hints and decrease reflection.
+* Tweak logging.
+
 ## Version 6.2.0
 * Add clojure.lang.IFn support on ZClient.
 * Overhaul ZNode startup and boot process.
