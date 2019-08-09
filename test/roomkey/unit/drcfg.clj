@@ -33,6 +33,12 @@
       (def>- y [12] :validator identity :meta {:doc "My Documentation"}) => (partial instance? clojure.lang.Var))
 
 (fact "def> expands correctly"
+      (macroexpand-1 `(def> y {} :validator identity))
+      => (just `(let ~(just [symbol? (just `(str "/" ~(just `(string/replace ~(just `(str *ns*)) #"\." "/")) "/" 'y))
+                             symbol? (just `(apply >- ~symbol? {} (:validator identity)))])
+                  ~(just `(when ~truthy
+                            ~(just `(znode/add-descendant ~(just `(.znode ~symbol?)) "/.metadata" ~(just {})))))
+                  ~(just `(def y ~symbol?))))
       (macroexpand-1 `(def> ^:foo y "My Documentation" [12] :validator identity))
       => (just `(let ~(just [symbol? (just `(str "/" ~(just `(string/replace ~(just `(str *ns*)) #"\." "/")) "/" 'y))
                              symbol? (just `(apply >- ~symbol? [12] (:validator identity)))])
