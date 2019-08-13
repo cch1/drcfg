@@ -174,16 +174,24 @@
                                          cwms))]
                        (recur cwms)
                        (do (async/>! events {::type ::watch-stop})
-                           (let [n (transduce (map (fn [wmgr] (.close ^roomkey.znode.Closeable wmgr))) + 1 (vals cwms))]
+                           (let [n (->> (vals cwms)
+                                        (map (fn [wmgr] (.close ^roomkey.znode.Closeable wmgr)))
+                                        async/merge
+                                        (async/reduce + 1)
+                                        async/<!)]
                              (log/warnf "The event channel closed abruptly with %d nodes seen; shutting down %s" n (str this))
                              n))))
                    (do (async/>! events {::type ::watch-stop})
-                       (let [n (transduce (map (fn [wmgr] (.close ^roomkey.znode.Closeable wmgr))) + 1 (vals cwms))]
+                       (let [n (->> (vals cwms)
+                                    (map (fn [wmgr] (.close ^roomkey.znode.Closeable wmgr)))
+                                    async/merge
+                                    (async/reduce + 1)
+                                    async/<!)]
                          (log/tracef "The event channel closed with %d nodes seen; shutting down %s" n (str this))
                          n))))]
         (async/>!! znode-events {:event-type :NodeDataChanged})
         (async/>!! znode-events {:event-type :NodeChildrenChanged})
-        (reify Closeable (close [this] (async/close! znode-events) (async/<!! rc))))))
+        (reify Closeable (close [this] (async/close! znode-events) rc)))))
   (compare-version-and-set! [this version value]
     (let [data [value (meta value)]
           stat' (zclient/set-data client path (*serialize* data) version {})]
@@ -347,10 +355,10 @@
                (do (log/debugf "Root client event %s (%s)" event wmgr)
                    (case event
                      ::zclient/connected (recur (or wmgr (watch root))) ; At startup and following session expiration
-                     ::zclient/expired (do (.close wmgr) (recur nil))
-                     ::zclient/closed (if wmgr (.close wmgr) 0) ; failed connections start but don't connect before closing?
+                     ::zclient/expired (do (async/<! (.close wmgr)) (recur nil))
+                     ::zclient/closed (if wmgr (async/<! (.close wmgr)) 0) ; failed connections start but don't connect before closing?
                      (recur wmgr)))
-               (if wmgr (.close wmgr) 0)))]
+               (if wmgr (async/<! (.close wmgr)) 0)))]
     (let [zclient-handle (apply zclient/open client args)]
       (reify Closeable (close [_]
                          (.close ^roomkey.zclient.Closeable zclient-handle)
