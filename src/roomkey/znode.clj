@@ -80,6 +80,18 @@
    (let [events (async/chan (async/sliding-buffer 4))]
      (->ZNode client path (ref {:version -1 :cversion -1 :aversion -1}) (ref value) (ref #{}) events))))
 
+(defn- close-nodes
+  [znodes]
+  "Given a collection of ZNodes, close each one.
+   Return a channel with a single value that is the sum of the values
+   from the channels returned by the closing of each ZNode. The returned
+   channel will not close or produce a value until all the znodes (and
+   thus their descendents) have closed."
+  (->> znodes
+       (map (fn [wmgr] (.close ^roomkey.znode.Closeable wmgr)))
+       async/merge
+       (async/reduce + 0)))
+
 ;; http://insideclojure.org/2016/03/16/collections/
 ;; http://spootnik.org/entries/2014/11/06/playing-with-clojure-core-interfaces/index.html
 ;; https://clojure.github.io/data.priority-map//index.html
@@ -174,19 +186,17 @@
                                          cwms))]
                        (recur cwms)
                        (do (async/>! events {::type ::watch-stop})
-                           (let [n (->> (vals cwms)
-                                        (map (fn [wmgr] (.close ^roomkey.znode.Closeable wmgr)))
-                                        async/merge
-                                        (async/reduce + 1)
-                                        async/<!)]
+                           (let [n (-> (vals cwms)
+                                       close-nodes
+                                       async/<!
+                                       inc)]
                              (log/warnf "The event channel closed abruptly with %d nodes seen; shutting down %s" n (str this))
                              n))))
                    (do (async/>! events {::type ::watch-stop})
-                       (let [n (->> (vals cwms)
-                                    (map (fn [wmgr] (.close ^roomkey.znode.Closeable wmgr)))
-                                    async/merge
-                                    (async/reduce + 1)
-                                    async/<!)]
+                       (let [n (-> (vals cwms)
+                                   close-nodes
+                                   async/<!
+                                   inc)]
                          (log/tracef "The event channel closed with %d nodes seen; shutting down %s" n (str this))
                          n))))]
         (async/>!! znode-events {:event-type :NodeDataChanged})
