@@ -180,7 +180,7 @@
                                                                              (assoc cwms child (watch child))) cwms child-adds)
                                                                    (reduce (fn [cwms child]
                                                                              (log/debugf "Processed remove for %s" (str child))
-                                                                             (.close ^roomkey.znode.Closeable (cwms child))
+                                                                             (async/<!! (.close ^roomkey.znode.Closeable (cwms child)))
                                                                              (dissoc cwms child)) cwms child-dels))))))
                                      (do (log/warnf "Unexpected znode event:state [%s:%s] while watching %s" event-type keeper-state (str this))
                                          cwms))]
