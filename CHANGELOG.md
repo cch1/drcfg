@@ -1,3 +1,13 @@
+## Version 6.4.2
+* Fix `roomkey.drcfg/def>` to properly support using a map as the default value
+
+## Version 6.4.1
+* Bump dependencies, namely:
+  org.clojure/clojure 1.10.0 -> 1.10.1
+  org.clojure/core.async 0.4.490 -> 0.4.500
+  org.clojure/tools.logging 0.4.1 -> 0.5.0
+  org.apache.zookeeper/zookeeper 3.5.4-beta -> 3.5.5
+
 ## Version 6.4.0
 * Return stat data structures from `znode/create!` and `znode/compare-version-and-set!`.  This requires newish versions of Zookeeper.
 
