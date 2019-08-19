@@ -1,3 +1,8 @@
+## Version 6.4.3
+* Prevent deadlock during shutdown of a ZNode tree. The Closable
+  returned by ZNode/watch now returns a channel upon invokation,
+  instead of blocking.
+
 ## Version 6.4.2
 * Fix `roomkey.drcfg/def>` to properly support using a map as the default value
 
