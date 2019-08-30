@@ -125,6 +125,7 @@
                      (assert (and (nil? path) (= :None event-type)) (format "Received node event %s for path %s on client event handler!" event-type path))
                      (log/debugf "Received raw client state event %s" keeper-state)
                      (case keeper-state
+                       :Closed nil ;; This appears to happen after the Expired keeper-state is encountered
                        :SyncConnected (async/put! client-events [::connected @client-atom])
                        :Disconnected (async/put! client-events [::disconnected @client-atom])
                        :Expired (let [z' (new-client)]
