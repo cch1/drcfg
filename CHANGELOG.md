@@ -1,3 +1,6 @@
+## Version 6.4.4
+* Handle :Closed keeper-state in ZClient
+
 ## Version 6.4.3
 * Prevent deadlock during shutdown of a ZNode tree. The Closable
   returned by ZNode/watch now returns a channel upon invokation,
