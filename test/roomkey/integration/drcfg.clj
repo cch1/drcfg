@@ -181,3 +181,21 @@
          (let [la (>- n "default-value" :meta {:doc "My Default Doc"})]
            (with-awaited-connection *root* *connect-string* sandbox
              la => (eventually-refers-to 10000 "value")))))
+
+(fact "Can redef old-style zref for proper REPL-based development"
+      (def>- drref 12 :meta {:doc "My Documentation String"})
+      (let [p (abs-path "/roomkey.integration.drcfg/drref")]
+        (with-awaited-connection *root* *connect-string* sandbox
+          (sync-path 5000 p 12)
+          @drref => 12))
+      (def>- drref 12 :meta {:doc "My Documentation String"})
+      (ns-unmap (symbol (str *ns*)) 'drref))
+
+(fact "Can redef new-style zref for proper REPL-based development"
+      (def> ^:private drref "docstring" 12)
+      (let [p (abs-path "/roomkey/integration/drcfg/drref")]
+        (with-awaited-connection *root* *connect-string* sandbox
+          (sync-path 5000 p 12)
+          @drref => 12
+          (def> ^:private drref "docstring" 12)))
+      (ns-unmap (symbol (str *ns*)) 'drref))
