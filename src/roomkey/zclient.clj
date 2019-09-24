@@ -112,7 +112,7 @@
 (deftype ZClient [client-atom mux]
   Connectable
   (open [this connect-string timeout] ; TODO: allow parameterization of ZooKeeper instantiation
-    (assert (nil? @client-atom) "Must close current connection before opeing a new connection!")
+    (assert (nil? @client-atom) "Must close current connection before opening a new connection!")
     (let [client-events (async/muxch* mux)
           raw-client-events (async/chan 1 (map event-to-map))
           ^Watcher client-watcher (make-watcher (partial async/put! raw-client-events))
