@@ -8,10 +8,13 @@
             [clojure.tools.logging :as log])
   (:import (java.time Instant)))
 
-;; TODO: Support (de)serialization to a vector of [value metadata]
 (defn ^:dynamic *deserialize* [^bytes b] {:pre [(instance? (Class/forName "[B") b)]} (read-string (String. b "UTF-8")))
 
 (defn ^:dynamic *serialize* [^Object obj] {:post [(instance? (Class/forName "[B") %)]} (binding [*print-dup* true] (.getBytes ^String (pr-str obj))))
+
+(defn encode [value] [value (meta value)])
+
+(defn decode [[value metadata]] (if (instance? clojure.lang.IMeta value) (with-meta value metadata) value))
 
 (defn- normalize-datum [{:keys [stat data]}] {::type ::datum ::value data ::stat stat})
 
@@ -29,8 +32,7 @@
 (let [v1-epoch (Instant/parse "2019-01-01T00:00:00.00Z")]
   (defn- decode-datum [{{mtime :mtime :as stat} ::stat value ::value :as zdata}]
     (if (and (.isBefore v1-epoch mtime) (sequential? value))
-      (update zdata ::value (fn [[value metadata]]
-                              (if (instance? clojure.lang.IMeta value) (with-meta value metadata) value)))
+      (update zdata ::value decode)
       zdata)))
 
 (declare tap-children tap-datum tap-stat process-children-changes)
@@ -124,10 +126,9 @@
 
   BackedZNode
   (create! [this] ; Synchronously create the node @ version zero, if not already present
-    (let [data [@value (meta @value)]]
-      (when-let [stat (zclient/create-znode client path {:persistent? true :data (*serialize* data)})]
-        (log/debugf "Created %s" (str this))
-        stat)))
+    (when-let [stat (zclient/create-znode client path {:persistent? true :data (-> @value encode *serialize*)})]
+      (log/debugf "Created %s" (str this))
+      stat))
   (delete! [this version]
     (zclient/delete client path version {})
     (log/debugf "Deleted %s" (str this))
