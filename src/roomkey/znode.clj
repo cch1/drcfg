@@ -174,9 +174,8 @@
                                                                      (zclient/with-connection handle-connection-loss
                                                                        (let [{:keys [stat paths]} (zclient/children client path {:watcher watcher})
                                                                              [child-adds child-dels] (process-children-changes this (set (keys cwms)) paths)]
-                                                                         (when (or (seq child-adds) (seq child-dels))
-                                                                           (async/>!! children-events {::type ::children-changed ::stat stat
-                                                                                                       ::inserted child-adds ::removed child-dels}))
+                                                                         (async/>!! children-events {::type ::children-changed ::stat stat
+                                                                                                     ::inserted child-adds ::removed child-dels})
                                                                          (as-> cwms cwms
                                                                            (reduce (fn [cwms child]
                                                                                      (log/debugf "Processed insert for %s" (str child))
