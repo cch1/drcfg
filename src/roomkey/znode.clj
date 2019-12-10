@@ -397,9 +397,7 @@
   ([] (new-root "/"))
   ([abs-path] (new-root abs-path ::root))
   ([abs-path value] (new-root abs-path value (zclient/create)))
-  ([abs-path value zclient]
-   (let [events (async/chan (async/sliding-buffer 5))]
-     (->ZNode zclient abs-path (ref {:version -1 :cversion -1 :aversion -1}) (ref value) (ref #{}) events))))
+  ([abs-path value zclient] (default zclient abs-path value)))
 
 ;; https://stackoverflow.com/questions/49373252/custom-pprint-for-defrecord-in-nested-structure
 ;; https://stackoverflow.com/questions/15179515/pretty-printing-a-record-using-a-custom-method-in-clojure
