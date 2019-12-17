@@ -61,11 +61,11 @@
       (let [$root (new-root)
             $child (add-descendant $root "/child" 0)]
         (with-connection $root (str connect-string sandbox) 500
-          $child => (eventually-streams 4 3000 (just [#::znode{:type ::znode/watch-start}
-                                                      (just #::znode{:type ::znode/created!})
-                                                      (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})
-                                                      (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
-                                                                     :inserted #{} :removed #{}})])))
+          $child => (eventually-streams 4 3000 (just #{#::znode{:type ::znode/watch-start}
+                                                       (just #::znode{:type ::znode/created!})
+                                                       (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})
+                                                       (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
+                                                                      :inserted #{} :removed #{}})})))
         $child => (has-ref-state [(stat? {:version 0}) 0 empty?])))
 
 (fact "Actualized ZNodes can be updated"
@@ -92,11 +92,11 @@
                                                        (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})
                                                        (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
                                                                       :inserted #{} :removed #{}})}))
-          $grandchild => (eventually-streams 4 2000 (just [#::znode{:type ::znode/watch-start}
-                                                           (just #::znode{:type ::znode/created!})
-                                                           (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})
-                                                           (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
-                                                                          :inserted #{} :removed #{}})])))
+          $grandchild => (eventually-streams 4 2000 (just #{#::znode{:type ::znode/watch-start}
+                                                            (just #::znode{:type ::znode/created!})
+                                                            (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})
+                                                            (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
+                                                                           :inserted #{} :removed #{}})})))
         $child => (eventually-streams 1 2000 (just [#::znode{:type ::znode/watch-stop}])))
       ;; ensure spurious wrongly-pathed acquired children don't appear
       (let [$root (new-root)]
