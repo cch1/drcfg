@@ -21,13 +21,10 @@
 (defn- deserialize-data
   "Process raw zdata into usefully deserialized types and structure"
   [node zdata]
-  (update zdata ::value (fn [ba] (try (*deserialize* ba)
-                                      (catch java.lang.RuntimeException e
-                                        (log/warnf "Unable to deserialize znode data [%s]" (str node))
-                                        ::unable-to-deserialize)
-                                      (catch java.lang.AssertionError e
-                                        (log/warnf "No data: %s [%s]" ba (str node))
-                                        ::no-data)))))
+  (update zdata ::value (fn [ba] (try (when ba (*deserialize* ba))
+                                      (catch java.lang.Exception e
+                                        (log/warnf e "Unable to deserialize znode data [%s]" (str node))
+                                        (throw e))))))
 
 (let [v1-epoch (Instant/parse "2019-01-01T00:00:00.00Z")]
   (defn- decode-datum [{{mtime :mtime :as stat} ::stat value ::value :as zdata}]
