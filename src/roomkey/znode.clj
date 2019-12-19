@@ -406,3 +406,20 @@
 (defmethod clojure.pprint/simple-dispatch ZNode
   [^roomkey.znode.ZNode znode]
   (pr znode))
+
+(defn walk
+  "Walk the tree defined by `connect-string` and transduce the asynchronously discovered nodes with `xform` and `f`."
+  [connect-string timeout xform f init]
+  (let [root (new-root "/")]
+    (with-connection root connect-string timeout
+      (async/<!! (async/transduce xform f init ((fn visit [z]
+                                                  (let [c (async/chan)]
+                                                    (async/go-loop [me nil them nil]
+                                                      (if (and me them)
+                                                        (async/pipe (async/merge (cons me them)) c true)
+                                                        (when-let [e (::type (async/<! z))]
+                                                          (case e
+                                                            ::watch-start (recur (async/to-chan [z]) them)
+                                                            ::children-changed (recur me (map visit (seq z)))
+                                                            (recur me them)))))
+                                                    c)) root))))))
