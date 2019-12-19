@@ -14,7 +14,8 @@
 (defn- deserialize
   [s]
   {:pre [(string? s)]}
-  (edn/read-string {:default (comp #(do (log/infof "Unrecognized tagged literal: %s" (pr-str %)) %)
+  (edn/read-string {:readers *data-readers*
+                    :default (comp #(do (log/infof "Unrecognized tagged literal: %s %s" (class %) (pr-str %)) %)
                                    tagged-literal)} s))
 
 (defn- serialize [^Object obj] {:post [(string? %)]} (binding [*print-dup* false *print-meta* true] (pr-str obj)))
