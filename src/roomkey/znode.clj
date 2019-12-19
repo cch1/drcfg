@@ -2,43 +2,39 @@
   "A facade for a Zookeeper znode"
   (:require [roomkey.zclient :as zclient]
             [clojure.string :as string]
+            [clojure.edn :as edn]
             [clojure.set :as set]
             [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as impl]
             [clojure.tools.logging :as log])
   (:import (java.time Instant)))
 
-(defn ^:dynamic *deserialize* [^bytes b] {:pre [(instance? (Class/forName "[B") b)]} (read-string (String. b "UTF-8")))
-
-(defn ^:dynamic *serialize* [^Object obj] {:post [(instance? (Class/forName "[B") %)]} (binding [*print-dup* true] (.getBytes ^String (pr-str obj))))
-
-(defn encode [value] [value (meta value)])
-
-(defn decode [[value metadata]] (if (instance? clojure.lang.IMeta value) (with-meta value metadata) value))
-
 (defn- normalize-datum [{:keys [stat data]}] {::type ::datum ::value data ::stat stat})
 
-(defn- deserialize-data
-  "Process raw zdata into usefully deserialized types and structure"
-  [node zdata]
-  (update zdata ::value (fn [ba] (try (when ba (*deserialize* ba))
-                                      (catch java.lang.Exception e
-                                        (log/warnf e "Unable to deserialize znode data [%s]" (str node))
-                                        (throw e))))))
+(defn- deserialize
+  [s]
+  {:pre [(string? s)]}
+  (edn/read-string {:default (comp #(do (log/infof "Unrecognized tagged literal: %s" (pr-str %)) %)
+                                   tagged-literal)} s))
 
-(let [v1-epoch (Instant/parse "2019-01-01T00:00:00.00Z")]
-  (defn- decode-datum [{{mtime :mtime :as stat} ::stat value ::value :as zdata}]
-    (if (and (.isBefore v1-epoch mtime) (sequential? value))
-      (update zdata ::value decode)
-      zdata)))
+(defn- serialize [^Object obj] {:post [(string? %)]} (binding [*print-dup* false *print-meta* true] (pr-str obj)))
+
+(defn- decode [^bytes b] {:pre [(instance? (Class/forName "[B") b)] :post [(string? %)]} (String. b "UTF-8"))
+
+(defn- encode [^String s] {:pre [(string? s)] :post [(instance? (Class/forName "[B") %)]} (.getBytes ^String s))
+
+(defn- decode-value
+  "Process raw zdata into usefully deserialized types and structure"
+  [zdata]
+  (update zdata ::value (comp deserialize decode)))
 
 (declare tap-children tap-datum tap-stat process-children-changes)
 
 (defn- zdata-xform
   [znode]
   (comp (map normalize-datum)
-        (map (partial deserialize-data znode))
-        (map decode-datum)
+        (filter ::value)
+        (map decode-value)
         (tap-datum znode)))
 
 ;;; A proxy for a znode in a zookeeper cluster.
@@ -123,7 +119,7 @@
 
   BackedZNode
   (create! [this] ; Synchronously create the node @ version zero, if not already present
-    (when-let [stat (zclient/create-znode client path {:persistent? true :data (-> @value encode *serialize*)})]
+    (when-let [stat (zclient/create-znode client path {:persistent? true :data ((comp encode serialize) @value)})]
       (log/debugf "Created %s" (str this))
       stat))
   (delete! [this version]
@@ -199,8 +195,8 @@
         (async/>!! znode-events {:event-type :NodeChildrenChanged})
         (reify Closeable (close [this] (async/close! znode-events) rc)))))
   (compare-version-and-set! [this version value]
-    (let [data [value (meta value)]
-          stat' (zclient/set-data client path (*serialize* data) version {})]
+    (let [data ((comp encode serialize) value)
+          stat' (zclient/set-data client path data version {})]
       (when stat'
         (log/debugf "Set value for %s @ %s" (str this) version)
         (dosync (ref-set stat stat')))

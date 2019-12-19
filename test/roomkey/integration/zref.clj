@@ -107,7 +107,7 @@
         (with-awaited-connection $root
           (let [c (zoo/connect (str connect-string sandbox))]
             $z => (eventually-vrefers-to 1000 ["A" 0])
-            (zoo/set-data c "/myzref" (znode/*serialize* [["B"] {:foo 2}]) 0)
+            (zoo/set-data c "/myzref" (.getBytes "^{:foo 2} [\"B\"]") 0)
             $z => (eventually-vrefers-to
                    1000 (just [(having-metadata ^{:foo 2} ["B"]) 1]))
             (meta $z) => (contains {:version 1})))))
@@ -123,7 +123,7 @@
             $z => (eventually-vrefers-to 1000 (just [(having-metadata ^:foo [:A]) 0]))
             (add-watch $z :sync (fn [& args] (deliver sync args)))
             (add-versioned-watch $z :v-sync (fn [& args] (deliver v-sync args)))
-            (zoo/set-data c "/myzref" (znode/*serialize* [[:B] {:bar true}]) 0)
+            (zoo/set-data c "/myzref" (.getBytes "^{:bar true} [:B]") 0)
             $z => (eventually-vrefers-to 1000 [[:B] 1])
             (deref v-sync 10000 :promise-never-delivered) => (just [:v-sync $z [[:A] 0] [[:B] 1]])
             (deref sync 10000 :promise-never-delivered) => (just [:sync $z [:A] [:B]])))))
@@ -136,9 +136,9 @@
           (with-awaited-connection $root
             $z => (eventually-vrefers-to 1000 ["A" 0])
             (add-watch $z :sync (fn [& args] (deliver sync args)))
-            (zoo/set-data c "/myzref" (znode/*serialize* [23 nil]) 0)
+            (zoo/set-data c "/myzref" (.getBytes "23") 0)
             (deref sync 1000 ::not-delivered) => ::not-delivered
-            (zoo/set-data c "/myzref" (znode/*serialize* ["B" nil]) 1)
+            (zoo/set-data c "/myzref" (.getBytes "\"B\"") 1)
             $z => (eventually-vrefers-to 1000 ["B" 2])))))
 
 (fact "Children do not intefere with their parents"
@@ -153,8 +153,8 @@
             $zB => (eventually-vrefers-to 1000 ["B" 0])
             (add-watch $zA :sync (fn [& args] (deliver sync-a args)))
             (add-watch $zB :sync (fn [& args] (deliver sync-b args)))
-            (zoo/set-data c "/myzref" (znode/*serialize* ["a" nil]) 0)
-            (zoo/set-data c "/myzref/child" (znode/*serialize* ["b" nil]) 0)
+            (zoo/set-data c "/myzref" (.getBytes "\"a\"") 0)
+            (zoo/set-data c "/myzref/child" (.getBytes "\"b\"") 0)
             @sync-a => (just [:sync (partial instance? roomkey.zref.ZRef) "A" "a"])
             @sync-b => (just [:sync (partial instance? roomkey.zref.ZRef) "B" "b"])
             $zA => (eventually-refers-to 1000 "a")

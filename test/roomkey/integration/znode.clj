@@ -297,7 +297,7 @@
                                                       (contains #::znode{:type ::znode/datum :value (having-metadata [] nil)})
                                                       (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
                                                                      :inserted #{} :removed #{}})}))
-            (zoo/set-data c "/myzref0" (znode/*serialize* [["B"] {:my 1}]) 0)
+            (zoo/set-data c "/myzref0" (.getBytes "^{:my 1} [\"B\"]") 0)
             $z0 => (eventually-streams 1 3000 (just [(contains #::znode{:type ::znode/datum :value (having-metadata ["B"] {:my 1})})]))))))
 
 (fact "Children are remembered across sessions"
@@ -309,7 +309,7 @@
                                                         (contains #::znode{:type ::znode/datum})
                                                         (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
                                                                        :inserted #{} :removed #{}})}))
-            (zoo/create c "/child" :data (znode/*serialize* [["B"] {:my 1}]))
+            (zoo/create c "/child" :data (.getBytes "^{:my 1} [\"B\"]"))
             (Thread/sleep 200))
           $root => (eventually-streams 2 3000 (just [(contains #::znode{:type ::znode/children-changed})
                                                      #::znode{:type ::znode/watch-stop}]))

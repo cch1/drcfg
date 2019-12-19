@@ -27,18 +27,18 @@
 
 (defn create-path!
   [path value]
-  (let [data (znode/*serialize* [value (meta value)])]
+  (let [data ((comp #'znode/encode #'znode/serialize) value)]
     (zoo/create-all *zc* path :persistent? true :data data)
     (zoo/set-data *zc* path data 0)))
 
 (defn set-path!
   [path value]
-  (zoo/set-data *zc* path (znode/*serialize* [value (meta value)]) -1))
+  (zoo/set-data *zc* path ((comp #'znode/encode #'znode/serialize) value) -1))
 
 (defn sync-path
   "Wait up to timeout milliseconds for v to appear at path"
   ([timeout path v]
-   (let [vbs (seq (znode/*serialize* [v (meta v)]))]
+   (let [vbs (seq ((comp #'znode/encode #'znode/serialize) v))]
      (loop [t timeout]
        (assert (pos? t) (format "Timed out after waiting %dms for %s to appear at %s" timeout v path))
        (if (and (zoo/exists *zc* path) (= vbs (seq (:data (zoo/data *zc* path)))))
