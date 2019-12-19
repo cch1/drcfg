@@ -15,7 +15,7 @@
   :min-lein-version "2.8.1"
   :dependencies [[org.clojure/clojure "1.10.1"]
                  [org.clojure/tools.logging "0.5.0"]
-                 [org.clojure/core.async "0.5.527"]
+                 [org.clojure/core.async "0.6.532"]
                  [org.clojure/tools.macro "0.1.5"]
                  [org.apache.zookeeper/zookeeper "3.5.6"]]
   :repositories {"rk-maven" {:url "s3p://rk-maven/releases/" :no-auth true}}
@@ -23,9 +23,9 @@
   :profiles {:dev {:dependencies [[midje "1.9.9"]
                                   [zookeeper-clj "0.9.4" :exclusions [org.apache.zookeeper/zookeeper commons-codec]]
                                   [org.apache.curator/curator-test "4.2.0"]
-                                  [org.slf4j/slf4j-api "1.7.29"]
-                                  [org.slf4j/jcl-over-slf4j "1.7.29"]
-                                  [org.slf4j/slf4j-log4j12 "1.7.29"]
+                                  [org.slf4j/slf4j-api "1.7.30"]
+                                  [org.slf4j/jcl-over-slf4j "1.7.30"]
+                                  [org.slf4j/slf4j-log4j12 "1.7.30"]
                                   [log4j/log4j "1.2.17"]]}
              :test {:resource-paths ["test-resources"]
                     :global-vars {*warn-on-reflection* true}}
