@@ -116,7 +116,7 @@
   java.lang.Object
   (toString [this] (format "%s: %s [version %d]" (.getName (class this)) (.path ^roomkey.znode.ZNode znode) (last (.vDeref this)))))
 
-(defn create
+(defn ^roomkey.zref.ZRef create
   [root-znode path default & options]
   (let [{validator :validator} (apply hash-map options)
         znode (znode/add-descendant root-znode path default)

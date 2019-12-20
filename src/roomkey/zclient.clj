@@ -206,7 +206,7 @@
                                        server))
                              "<No Raw Client>"))))
 
-(defn create [] (->ZClient (atom nil) (async/mult (async/chan 1))))
+(defn create ^roomkey.zclient.ZClient [] (->ZClient (atom nil) (async/mult (async/chan 1))))
 
 (defmacro with-awaited-open-connection
   [zclient connect-string timeout & body]

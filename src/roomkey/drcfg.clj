@@ -43,7 +43,7 @@
          (Thread/sleep (/ timeout 10)) ; let ZNode acquisition settle down solely to avoid innocuous "Lost connection while processing" errors.
          root)))))
 
-(defn >-
+(defn ^roomkey.zref.ZRef >-
   "Create a config reference with the given name (must be fully specified,
   including leading slash) and default value and record it for future connecting"
   [name default & options]
@@ -112,6 +112,6 @@
         m (meta symb)
         options (mapcat identity (select-keys options [:validator]))]
     `(let [bpath# (str "/" (string/replace (str *ns*) #"\." "/") "/" '~symb)
-           z# (apply >- bpath# ~default ~options)]
+           ^roomkey.zref.ZRef z# (apply >- bpath# ~default ~options)]
        (when ~m (znode/add-descendant (.znode z#) "/.metadata" ~m))
        (def ~symb z#))))

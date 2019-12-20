@@ -29,7 +29,7 @@
   [zdata]
   (update zdata ::value (comp deserialize decode)))
 
-(declare tap-children tap-datum tap-stat process-children-changes)
+(declare tap-children tap-datum tap-stat process-children-changes default)
 
 (defn- zdata-xform
   [znode]
@@ -69,12 +69,6 @@
   (close [this] "Close the resource"))
 
 (declare ->ZNode)
-
-(defn default ; NB: This operation does not update the children of the parent
-  ([client path] (default client path ::unknown))
-  ([client path value]
-   (let [events (async/chan (async/sliding-buffer 4))]
-     (->ZNode client path (ref {:version -1 :cversion -1 :aversion -1}) (ref value) (ref #{}) events))))
 
 (defn- close-nodes
   [znodes]
@@ -281,6 +275,12 @@
   (hashCode [this] (.hashCode [path client]))
   (toString [this] (format "%s: %s" (.. this (getClass) (getSimpleName)) path)))
 
+(defn ^roomkey.znode.ZNode default ; NB: This operation does not update the children of the parent
+  ([client path] (default client path ::unknown))
+  ([client path value]
+   (let [events (async/chan (async/sliding-buffer 4))]
+     (->ZNode client path (ref {:version -1 :cversion -1 :aversion -1}) (ref value) (ref #{}) events))))
+
 (defn- tap-children
   [^roomkey.znode.ZNode node]
   (let [stat-ref (.stat node)
@@ -335,7 +335,7 @@
           (ref-set stat-ref stat))
          (rf result input))))))
 
-(defn add-descendant
+(defn ^roomkey.znode.ZNode add-descendant
   "Add a descendant ZNode to the given parent's (sub)tree `root` ZNode at the given (relative) `path` carrying the given `value`
   creating placeholder intermediate nodes as required."
   [^roomkey.znode.ZNode parent path value]
@@ -372,20 +372,20 @@
 
 (defmacro with-connection
   [znode connect-string timeout & body]
-  `(let [znode# ~znode
+  `(let [^roomkey.znode.ZNode znode# ~znode
          z# (.client znode#)
          cs# ~connect-string
          t# ~timeout
          c# (async/chan 10)]
      (async/tap z# c#)
-     (let [r# (with-open [_# (open znode# cs# t#)]
+     (let [r# (with-open [^roomkey.znode.Closeable _# (open znode# cs# t#)]
                 (let [event# (first (async/<!! c#))] (assert (= ::zclient/started event#)))
                 (let [event# (first (async/<!! c#))] (assert (= ::zclient/connected event#)))
                 ~@body)]
        (let [event# (first (async/<!! c#))] (assert (= ::zclient/closed event#)))
        r#)))
 
-(defn new-root
+(defn ^roomkey.znode.ZNode new-root
   "Create a root znode"
   ([] (new-root "/"))
   ([abs-path] (new-root abs-path ::root))
