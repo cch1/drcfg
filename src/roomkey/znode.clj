@@ -354,21 +354,22 @@
   (let [client (.client root)
         tap (async/tap client (async/chan 2))
         rc (async/go-loop [^roomkey.znode.Closeable wmgr nil] ; start event listener loop
-             (if-let [[event client] (async/<! tap)]
+             (when-let [[event client] (async/<! tap)]
                (do (log/debugf "Root client event %s (%s)" event wmgr)
                    (case event
                      ::zclient/connected (recur (or wmgr (watch root))) ; At startup and following session expiration
                      ::zclient/expired (do (async/<! (.close wmgr)) (recur nil))
-                     ::zclient/closed (if wmgr (async/<! (.close wmgr)) 0) ; failed connections start but don't connect before closing?
-                     (recur wmgr)))
-               (if wmgr (async/<! (.close wmgr)) 0)))]
+                     ::zclient/closed (do
+                                        (async/close! tap)
+                                        (let [n (if wmgr (async/<! (.close wmgr)) 0)]
+                                          (log/debugf "The client event channel closed with %d nodes seen, shutting down %s" n (str root))
+                                          n)) ; failed connections start but don't connect before closing?
+                     (recur wmgr)))))]
     (let [zclient-handle (apply zclient/open client args)]
-      (reify Closeable (close [_]
-                         (.close ^java.io.Closeable zclient-handle)
-                         (async/close! tap)
-                         (let [n (async/<!! rc)]
-                           (log/debugf "The client event channel closed with %d nodes seen, shutting down %s" n (str root))
-                           n))))))
+      (reify java.io.Closeable
+        (close [_]
+          (.close ^java.io.Closeable zclient-handle)
+          (async/<!! rc))))))
 
 (defmacro with-connection
   [znode connect-string timeout & body]
@@ -378,7 +379,7 @@
          t# ~timeout
          c# (async/chan 10)]
      (async/tap z# c#)
-     (let [r# (with-open [^roomkey.znode.Closeable _# (open znode# cs# t#)]
+     (let [r# (with-open [^java.io.Closeable _# (open znode# cs# t#)]
                 (let [event# (first (async/<!! c#))] (assert (= ::zclient/started event#)))
                 (let [event# (first (async/<!! c#))] (assert (= ::zclient/connected event#)))
                 ~@body)]
