@@ -8,4 +8,4 @@
       (let [$c (create)]
         (for [n (range 5)]
           (let [handle (open $c (str connect-string "/drcfg") 8000)]
-            (.close handle))) => (five-of true)))
+            (.close handle))) => (five-of nil)))

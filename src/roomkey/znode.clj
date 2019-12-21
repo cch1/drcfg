@@ -364,7 +364,7 @@
                (if wmgr (async/<! (.close wmgr)) 0)))]
     (let [zclient-handle (apply zclient/open client args)]
       (reify Closeable (close [_]
-                         (.close ^roomkey.zclient.Closeable zclient-handle)
+                         (.close ^java.io.Closeable zclient-handle)
                          (async/close! tap)
                          (let [n (async/<!! rc)]
                            (log/debugf "The client event channel closed with %d nodes seen, shutting down %s" n (str root))

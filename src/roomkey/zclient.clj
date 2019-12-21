@@ -1,7 +1,7 @@
 (ns roomkey.zclient
   "A resilient and respawning Zookeeper client"
   (:import [org.apache.zookeeper ZooKeeper Watcher WatchedEvent
-            CreateMode
+            CreateMode ZooKeeper$States
             Watcher$Event$EventType Watcher$Event$KeeperState
             KeeperException KeeperException$Code
             KeeperException$SessionExpiredException
@@ -64,9 +64,6 @@
   (open [this connect-string timeout] "Open the connection")
   (connected? [this] "Is this client currently connected to the ZooKeeper cluster?"))
 
-(defprotocol Closeable
-  (close [this] "Close the resource"))
-
 (defprotocol ZooKeeperFacing
   (create-znode [this path options] "Create a ZNode at the given path")
   (data [this path options] "Fetch the data from the ZNode at the path")
@@ -120,30 +117,29 @@
       (reset! client-atom (new-client))
       (async/put! client-events [::started @client-atom])
       (let [rc (async/go-loop [] ; https://zookeeper.apache.org/doc/r3.5.4-beta/zookeeperProgrammers.html#ch_zkSessions
-                 (if-let [{:keys [event-type keeper-state path] :as event} (async/<! raw-client-events)]
-                   (do
-                     (assert (and (nil? path) (= :None event-type)) (format "Received node event %s for path %s on client event handler!" event-type path))
-                     (log/debugf "Received raw client state event %s" keeper-state)
-                     (case keeper-state
-                       :Closed nil ;; This appears to happen after the Expired keeper-state is encountered
-                       :SyncConnected (async/put! client-events [::connected @client-atom])
-                       :Disconnected (async/put! client-events [::disconnected @client-atom])
-                       :Expired (let [z' (new-client)]
-                                  ;; Do we need to close the old client?
-                                  (async/put! client-events [::expired @client-atom])
-                                  (swap! client-atom (constantly z'))
-                                  (async/put! client-events [::started @client-atom])
-                                  (log/warnf "Session expired, new client created (%s)" (str this)))
-                       (throw (Exception. (format "Unexpected event: %s" event))))
-                     (recur))
-                   (do
-                     (log/debugf "Event processing closed for %s" (str this))
-                     (async/put! client-events [::closed (swap! client-atom (fn [client] (when client (.close ^ZooKeeper client timeout)) nil))]))))]
+                 (when-let [{:keys [event-type keeper-state path] :as event} (async/<! raw-client-events)]
+                   (assert (and (nil? path) (= :None event-type)) (format "Received node event %s for path %s on client event handler!" event-type path))
+                   (log/debugf "Received raw client state event %s" keeper-state)
+                   (case keeper-state
+                     :Closed (do
+                               (async/put! client-events [::closed (swap! client-atom (constantly nil))])
+                               (async/close! raw-client-events))
+                     :SyncConnected (async/put! client-events [::connected @client-atom])
+                     :Disconnected (async/put! client-events [::disconnected @client-atom])
+                     :Expired (let [z' (new-client)]
+                                ;; Do we need to close the old client?
+                                (async/put! client-events [::expired @client-atom])
+                                (swap! client-atom (constantly z'))
+                                (async/put! client-events [::started @client-atom])
+                                (log/warnf "Session expired, new client created (%s)" (str this)))
+                     (throw (Exception. (format "Unexpected event: %s" event))))
+                   (recur)))]
         (log/debugf "Event processing opened for %s" (str this))
-        (reify Closeable (close [_] (async/close! raw-client-events) (async/<!! rc))))))
+        (reify java.io.Closeable (close [_] (when-let [c @client-atom] (.close ^ZooKeeper c timeout) (async/<!! rc)))))))
   (connected? [this] (when-let [client ^ZooKeeper @client-atom]
-                       (when (= :CONNECTED (some-> client .getState .toString keyword))
+                       (when (#{ZooKeeper$States/CONNECTED ZooKeeper$States/CONNECTEDREADONLY} (.getState client))
                          client)))
+
   ZooKeeperFacing
   (delete [this path version {:keys [] :or {}}]
     (with-client ^void (.delete client path version))
