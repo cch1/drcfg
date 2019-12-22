@@ -53,11 +53,11 @@
    :keeper-state (keyword (.name (.getState event)))
    :path (.getPath event)})
 
-(defn- ^Watcher make-watcher
+(defn ^Watcher make-watcher
   [f]
   (reify Watcher
     (process [this event]
-      (f event))))
+      ((comp f event-to-map) event))))
 
 ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html
 (defprotocol Connectable
@@ -112,7 +112,7 @@
     (assert (nil? @client-atom) "Must close current connection before opening a new connection!")
     (let [client-events (async/muxch* mux)
           raw-client-events (async/chan 1 (map event-to-map))
-          ^Watcher client-watcher (make-watcher (partial async/put! raw-client-events))
+          ^Watcher client-watcher (reify Watcher (process [_ event] (async/put! raw-client-events event)))
           new-client (fn [] (ZooKeeper. ^String connect-string ^int timeout client-watcher true))]
       (reset! client-atom (new-client))
       (async/put! client-events [::started @client-atom])
@@ -159,19 +159,19 @@
   (data [this path {:keys [watcher watch?] :or {watch? false}}]
     (let [stat (Stat.)]
       {:data (with-client ^bytes (if watcher
-                                   (.getData client ^String path (make-watcher (comp watcher event-to-map)) stat)
+                                   (.getData client ^String path (if (instance? Watcher watcher) watcher (make-watcher watcher)) stat)
                                    (.getData client ^String path ^boolean watch? stat)))
        :stat (stat-to-map stat)}))
   (children [this path {:keys [watcher watch?] :or {watch? false}}]
     (let [stat (Stat.)]
       {:paths (into () (with-client ^java.util.List (if watcher
-                                                      (.getChildren client ^String path (make-watcher (comp watcher event-to-map)) stat)
+                                                      (.getChildren client ^String path (if (instance? Watcher watcher) watcher (make-watcher watcher)) stat)
                                                       (.getChildren client ^String path ^boolean watch? stat))))
        :stat (stat-to-map stat)}))
   (exists [this path {:keys [watcher watch?] :or {watch? false}}]
     (let [w (if watcher  watch?)]
       (when-let [stat (with-client ^Stat (if watcher
-                                           (.exists client ^String path (make-watcher (comp watcher event-to-map)))
+                                           (.exists client ^String path (if (instance? Watcher watcher) watcher (make-watcher watcher)))
                                            (.exists client ^String path ^boolean watch?)))]
         (stat-to-map stat))))
 
