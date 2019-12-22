@@ -376,3 +376,19 @@
                                                                              :inserted #{} :removed #{}})}))))
         (let [$grandchild ($root "/child/grandchild")]
           $grandchild => (eventually-streams 1 2000 (just [#::znode{:type ::znode/watch-stop}])))))
+
+(defchecker znode-at [expected-path]
+  (checker [actual] (= (.path actual) expected-path)))
+
+(fact "The tree can be walked"
+      (let [$root (new-root)
+            $child0 (add-descendant $root "/child0" 0)
+            $child1 (add-descendant $root "/child1" (with-meta #{1 2 3} {:foo "bar"}))
+            $grandchild (add-descendant $root "/child0/grandchild" 0)]
+        (with-connection $root (str connect-string sandbox) 500
+          $root => (eventually-streams 4 3000 (contains #{#::znode{:type ::znode/watch-start}}))
+          $child0 => (eventually-streams 4 3000 (contains #{#::znode{:type ::znode/watch-start}}))
+          $child1 => (eventually-streams 4 3000 (contains #{#::znode{:type ::znode/watch-start}}))
+          $grandchild => (eventually-streams 4 3000 (contains #{#::znode{:type ::znode/watch-start}})))
+        (znode/walk (str connect-string sandbox) 500 identity conj ()) => (contains #{(znode-at "/") (znode-at "/child0")
+                                                                                      (znode-at "/child1") (znode-at "/child0/grandchild")})))
