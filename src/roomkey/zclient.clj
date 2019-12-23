@@ -122,15 +122,15 @@
                    (log/debugf "Received raw client state event %s" keeper-state)
                    (case keeper-state
                      :Closed (do
-                               (async/put! client-events [::closed (swap! client-atom (constantly nil))])
+                               (async/>! client-events [::closed (swap! client-atom (constantly nil))])
                                (async/close! raw-client-events))
-                     :SyncConnected (async/put! client-events [::connected @client-atom])
-                     :Disconnected (async/put! client-events [::disconnected @client-atom])
+                     :SyncConnected (async/>! client-events [::connected @client-atom])
+                     :Disconnected (async/>! client-events [::disconnected @client-atom])
                      :Expired (let [z' (new-client)]
                                 ;; Do we need to close the old client?
-                                (async/put! client-events [::expired @client-atom])
+                                (async/>! client-events [::expired @client-atom])
                                 (swap! client-atom (constantly z'))
-                                (async/put! client-events [::started @client-atom])
+                                (async/>! client-events [::started @client-atom])
                                 (log/warnf "Session expired, new client created (%s)" (str this)))
                      (throw (Exception. (format "Unexpected event: %s" event))))
                    (recur)))]
