@@ -135,7 +135,9 @@
                      (throw (Exception. (format "Unexpected event: %s" event))))
                    (recur)))]
         (log/debugf "Event processing opened for %s" (str this))
-        (reify java.io.Closeable (close [_] (when-let [c @client-atom] (.close ^ZooKeeper c timeout) (async/<!! rc)))))))
+        (reify java.io.Closeable (close [_] (when-let [c @client-atom] (when-not (.close ^ZooKeeper c timeout)
+                                                                         (log/warnf "%s did not shut down cleanly" (str this))))
+                                        (async/<!! rc))))))
   (connected? [this] (when-let [client ^ZooKeeper @client-atom]
                        (when (#{ZooKeeper$States/CONNECTED ZooKeeper$States/CONNECTEDREADONLY} (.getState client))
                          client)))
