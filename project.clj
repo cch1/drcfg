@@ -19,7 +19,7 @@
                  [org.clojure/tools.macro "0.1.5"]
                  [org.apache.zookeeper/zookeeper "3.5.6"]]
   :repositories {"rk-maven" {:url "s3p://rk-maven/releases/" :no-auth true}}
-  :jvm-opts ["-Djava.io.tmpdir=./tmp"]
+  :jvm-opts ["-Djava.io.tmpdir=./tmp" "-Dclojure.core.async.go-checking=true"]
   :profiles {:dev {:dependencies [[midje "1.9.9"]
                                   [zookeeper-clj "0.9.4" :exclusions [org.apache.zookeeper/zookeeper commons-codec]]
                                   [org.apache.curator/curator-test "4.2.0"]
