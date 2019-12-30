@@ -166,9 +166,9 @@
        :stat (stat-to-map stat)}))
   (children [this path {:keys [watcher watch?] :or {watch? false}}]
     (let [stat (Stat.)]
-      {:paths (into () (with-client ^java.util.List (if watcher
-                                                      (.getChildren client ^String path (if (instance? Watcher watcher) watcher (make-watcher watcher)) stat)
-                                                      (.getChildren client ^String path ^boolean watch? stat))))
+      {:children (into () (with-client ^java.util.List (if watcher
+                                                         (.getChildren client ^String path (if (instance? Watcher watcher) watcher (make-watcher watcher)) stat)
+                                                         (.getChildren client ^String path ^boolean watch? stat))))
        :stat (stat-to-map stat)}))
   (exists [this path {:keys [watcher watch?] :or {watch? false}}]
     (let [w (if watcher  watch?)]

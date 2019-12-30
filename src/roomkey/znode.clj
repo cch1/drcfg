@@ -169,12 +169,12 @@
                                :NodeChildrenChanged (async/<!
                                                      (async/thread
                                                        (or (zclient/with-connection handle-connection-loss
-                                                             (let [children (keys cws)
-                                                                   {:keys [stat paths]} (zclient/children client path {:watcher watcher})
-                                                                   [adds dels] (delta (set (map name children)) (set paths))
+                                                             (let [zchildren (keys cws)
+                                                                   {:keys [stat children]} (zclient/children client path {:watcher watcher})
+                                                                   [adds dels] (delta (set (map name zchildren)) (set children))
                                                                    child-adds (into #{} (comp (map #(str path-prefix %))
                                                                                               (map #(update-or-add-child this % ::placeholder))) adds)
-                                                                   child-dels (into #{} (map (fn [cname] (some #(when (= cname (name %)) %) children))) dels)]
+                                                                   child-dels (into #{} (map (fn [cname] (some #(when (= cname (name %)) %) zchildren))) dels)]
                                                                (async/>!! children-events {::type ::children-changed ::stat stat
                                                                                            ::inserted child-adds ::removed child-dels})
                                                                (async/<!! (async/into cws (async/merge (map watch child-adds))))))

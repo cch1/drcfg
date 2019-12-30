@@ -68,7 +68,7 @@
           (set-data $client "/myznode" (.getBytes "foo") 0 {}) => (contains {:version 1 :mtime (partial instance? java.time.Instant)})
           (set-data $client "/myznode" (.getBytes "foo") 0 {}) => nil
           (Thread/sleep 20)
-          (children $client "/myznode" {}) => (just {:paths (one-of string?) :stat map?})
+          (children $client "/myznode" {}) => (just {:children (one-of string?) :stat map?})
           (delete $client "/myznode/child" 0 {}) => truthy
           (delete $client "/myznode" 1 {}) => truthy)))
 
