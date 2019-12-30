@@ -14,7 +14,7 @@
 (def sandbox "/sandbox")
 
 (defn- streams [n timeout c]
-  "Captures the first `n` streamed elements of c subject to a timeout of `timeout` ms"
+  "Captures the first `n` streamed elements of `c` subject to a timeout of `timeout` ms"
   (let [result (async/alt!!
                  (async/into [] (async/take n c 5)) ([v] (or v ::channel-closed))
                  (async/timeout timeout) ([v] (or v ::timeout)))]
@@ -55,7 +55,7 @@
       (let [$root (new-root)
             alm (open $root (str connect-string sandbox) 500)]
         alm => (partial instance? java.io.Closeable)
-        (.close alm) => anything))
+        (.close alm) => nil?))
 
 (fact "ZNodes can be actualized and stream current value"
       (let [$root (new-root)
