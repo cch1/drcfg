@@ -57,13 +57,13 @@
   (compare-version-and-set! [this current-version new-value]   "Atomically set the value of this znode to `new-value` if and only if the current
   version is identical to `current-version`. Returns true if set happened, else false")
   (watch [this] "Recursively watch the znode and its children, returning a WatchManager that can be closed to cease watching, read from to
- get the results of watching and, as seq'd, to obtain the WatchManagers of its children")
-  (signature [this] "Return a (Clojure) hash equivalent to a signature of the state of the subtree at this ZNode"))
+ get the results of watching and, as seq'd, to obtain the WatchManagers of its children"))
 
 (defprotocol VirtualNode
   "A value-bearing node in a tree"
   (update-or-add-child [this path value] "Update the existing child or create a new child of this node at the given path & with the given default value")
-  (overlay [this v] "Overlay the existing placeholder node's value with a concrete value"))
+  (overlay [this v] "Overlay the existing placeholder node's value with a concrete value")
+  (signature [this] "Return a (Clojure) hash equivalent to a signature of the state of the subtree at this ZNode"))
 
 ;; http://insideclojure.org/2016/03/16/collections/
 ;; http://spootnik.org/entries/2014/11/06/playing-with-clojure-core-interfaces/index.html
