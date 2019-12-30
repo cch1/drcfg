@@ -103,6 +103,16 @@
   (update-or-add-child [this path v]
     (let [z' (default client path v)]
       (.get ^clojure.lang.ITransientSet (conj! this z') z')))
+  (signature [this] (dosync
+                     (transduce (map signature)
+                                (fn accumulate-independently-then-hash
+                                  ([] [[nil #{}] [nil #{}]])
+                                  ([acc] (mapv hash acc))
+                                  ([acc child-hash] (-> acc
+                                                        (update-in [0 1] conj (child-hash 0))
+                                                        (update-in [1 1] conj (child-hash 1)))))
+                                [[@stat #{}] [@value #{}]]
+                                @children)))
 
   BackedZNode
   (create! [this] ; Synchronously create the node @ version zero, if not already present
@@ -110,16 +120,14 @@
       (log/debugf "Created %s" (str this))
       stat))
   (delete! [this version]
-    (zclient/delete client path version {})
-    (log/debugf "Deleted %s" (str this))
-    true)
+    (when (zclient/delete client path version {})
+      (log/debugf "Deleted %s" (str this))
+      true))
   (compare-version-and-set! [this version value]
-    (let [data ((comp encode serialize) value)
-          stat' (zclient/set-data client path data version {})]
-      (when stat'
-        (log/debugf "Set value for %s @ %s" (str this) version)
-        (dosync (ref-set stat stat')))
-      stat'))
+    (when-let [stat (zclient/set-data client path ((comp encode serialize) value) version {})]
+      (when stat
+        (log/debugf "Set value for %s" (str this))
+        stat)))
   (watch [this] ; This is called recursively inside parent's go block -it MUST be non-blocking.
     (log/tracef "Watching %s" (str this))
     (let [path-prefix (as-> (str path "/") s (if (= s "//") "/" s))
@@ -174,16 +182,6 @@
                     (do (async/>! events {::type ::watch-stop})
                         (log/tracef "The event channel closed; shutting down %s" (str this))
                         (async/<! (async/reduce + 1 (async/merge (vals cws)))))))]))))
-  (signature [this] (dosync
-                     (transduce (map signature)
-                                (fn accumulate-independently-then-hash
-                                  ([] [[nil #{}] [nil #{}]])
-                                  ([acc] (mapv hash acc))
-                                  ([acc child-hash] (-> acc
-                                                       (update-in [0 1] conj (child-hash 0))
-                                                       (update-in [1 1] conj (child-hash 1)))))
-                                [[@stat #{}] [@value #{}]]
-                                @children)))
 
   clojure.lang.Named
   (getName [this] (let [segments (string/split path #"/")] (or (last segments) "")))
