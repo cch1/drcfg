@@ -134,23 +134,21 @@
           handle-channel-error (fn [e] (log/errorf e "Exception while processing channel event for %s" (str this)))
           znode-events (async/chan 10 identity handle-channel-error)
           data-events (async/chan 1 (zdata-xform this) handle-channel-error)
-          delete-events (async/chan 1 identity handle-channel-error)
           children-events (async/chan 1 (tap-children this) handle-channel-error)
-          exists-events (async/chan 1 (tap-stat this) handle-channel-error)
+          stat-events (async/chan 1 (tap-stat this) handle-channel-error)
           handle-connection-loss (make-connection-loss-handler this znode-events)
           watcher (zclient/make-watcher (partial async/put! znode-events))
           zop (fn [op] (async/thread (zclient/with-connection handle-connection-loss (op client path {:watcher watcher}))))]
       (async/pipe data-events events false)
-      (async/pipe delete-events events false)
       (async/pipe children-events events false)
-      (async/pipe exists-events events false)
+      (async/pipe stat-events events false)
       ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches
       ;; https://www.safaribooksonline.com/library/view/zookeeper/9781449361297/ch04.html
       (async/go
         (async/>! events {::type ::watch-start})
         (let [stat (async/<! (zop zclient/exists))]
           (when stat
-            (async/>! exists-events {::type ::exists ::stat stat})
+            (async/>! stat-events {::type ::exists ::stat stat})
             (async/>! znode-events {:event-type ::Boot :keeper-state ::Boot}))
           [this (async/go-loop [cws (async/<! (async/into {} (async/merge (map watch @children))))]
                   (if-let [{:keys [event-type keeper-state] :as event} (async/<! znode-events)]
@@ -159,10 +157,10 @@
                       (case event-type
                         :None (do (async/close! znode-events) (recur cws))
                         :NodeCreated (let [stat (async/<! (zop zclient/exists))]
-                                       (async/>! events {::type ::created! ::stat stat})
+                                       (async/>! stat-events {::type ::created! ::stat stat})
                                        (async/>! znode-events {:event-type ::Boot :keeper-state ::Boot})
                                        (recur cws))
-                        :NodeDeleted (do (async/>! delete-events {::type ::deleted!}) (async/close! znode-events) (recur cws))
+                        :NodeDeleted (do (async/>! events {::type ::deleted!}) (async/close! znode-events) (recur cws))
                         :NodeDataChanged (do (async/pipe (zop zclient/data) data-events false) (recur cws))
                         :NodeChildrenChanged (if-let [{:keys [children stat]} (async/<! (zop zclient/children))]
                                                (let [lcl (into #{} (map key) cws)
