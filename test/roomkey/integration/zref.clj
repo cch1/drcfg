@@ -55,6 +55,7 @@
 
 (background (around :facts (with-open [c (zoo/connect connect-string)]
                              (zoo/delete-all c sandbox)
+                             (zoo/create c sandbox :persistent? true :async? false :data (.getBytes ":roomkey.znode/root"))
                              ?form)))
 
 (let [counter (atom 0)]

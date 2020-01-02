@@ -49,6 +49,7 @@
 
 (background (around :facts (with-open [c (zoo/connect connect-string)]
                              (zoo/delete-all c sandbox)
+                             (zoo/create c sandbox :persistent? true :async? false :data (.getBytes ":roomkey.znode/root"))
                              ?form)))
 
 (fact "Can open and close a ZNode"
@@ -57,14 +58,29 @@
         alm => (partial instance? java.io.Closeable)
         (.close alm) => nil?))
 
+(fact "Root ZNode streams exists data"
+      (let [$root (new-root)]
+        (with-connection $root (str connect-string sandbox) 500
+          $root => (eventually-streams 4 3000 (just #{#::znode{:type ::znode/watch-start}
+                                                      (just #::znode{:type ::znode/exists :stat (stat? {:version 0})})
+                                                      (just #::znode{:type ::znode/datum :value :roomkey.znode/root :stat (stat? {:version 0})})
+                                                      (just #::znode{:type ::znode/children-changed :stat (stat? {:cversion 0})
+                                                                     :inserted #{} :removed #{}})})))
+        $root => (has-ref-state [(stat? {:version 0}) :roomkey.znode/root empty?])))
+
 (fact "ZNodes can be actualized and stream current value"
       (let [$root (new-root)
             $child (add-descendant $root "/child" 0)]
         (with-connection $root (str connect-string sandbox) 500
+          $root => (eventually-streams 4 3000 (just #{#::znode{:type ::znode/watch-start}
+                                                      (just #::znode{:type ::znode/exists :stat (stat? {:version 0})})
+                                                      (just #::znode{:type ::znode/datum :value :roomkey.znode/root :stat (stat? {:version 0})})
+                                                      (just #::znode{:type ::znode/children-changed :stat (stat? {:cversion 0})
+                                                                     :inserted #{} :removed #{}})}))
           $child => (eventually-streams 4 3000 (just #{#::znode{:type ::znode/watch-start}
-                                                       (just #::znode{:type ::znode/created!})
+                                                       (just #::znode{:type ::znode/created! :stat (stat? {})})
                                                        (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})
-                                                       (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
+                                                       (just #::znode{:type ::znode/children-changed :stat (stat? {:cversion 0})
                                                                       :inserted #{} :removed #{}})})))
         $child => (has-ref-state [(stat? {:version 0}) 0 empty?])))
 
@@ -73,9 +89,9 @@
             $child (add-descendant $root "/child" 0)]
         (with-connection $root (str connect-string sandbox) 500
           $child => (eventually-streams 4 5000 (just #{#::znode{:type ::znode/watch-start}
-                                                       (just #::znode{:type ::znode/created!})
+                                                       (just #::znode{:type ::znode/created! :stat (stat? {})})
                                                        (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})
-                                                       (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
+                                                       (just #::znode{:type ::znode/children-changed :stat (stat? {:cversion 0})
                                                                       :inserted #{} :removed #{}})}))
           $child => (has-ref-state [(stat? {:version 0}) 0 empty?])
           (compare-version-and-set! $child 0 1) => stat?
@@ -88,14 +104,14 @@
             $grandchild (add-descendant $root "/child/grandchild" 0)]
         (with-connection $root (str connect-string sandbox) 500
           $child => (eventually-streams 4 2000 (just #{#::znode{:type ::znode/watch-start}
-                                                       (just #::znode{:type ::znode/created!})
+                                                       (just #::znode{:type ::znode/created! :stat (stat? {})})
                                                        (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})
-                                                       (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
+                                                       (just #::znode{:type ::znode/children-changed :stat (stat? {:cversion 0})
                                                                       :inserted #{} :removed #{}})}))
           $grandchild => (eventually-streams 4 2000 (just #{#::znode{:type ::znode/watch-start}
-                                                            (just #::znode{:type ::znode/created!})
+                                                            (just #::znode{:type ::znode/created! :stat (stat? {})})
                                                             (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})
-                                                            (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
+                                                            (just #::znode{:type ::znode/children-changed :stat (stat? {:cversion 0})
                                                                            :inserted #{} :removed #{}})})))
         $child => (eventually-streams 1 2000 (just [#::znode{:type ::znode/watch-stop}])))
       ;; ensure spurious wrongly-pathed acquired children don't appear
@@ -130,7 +146,7 @@
             $child (add-descendant $root "/child" 0)]
         (with-connection $root (str connect-string sandbox) 500
           $child => (eventually-streams 4 2000 (just #{#::znode{:type ::znode/watch-start}
-                                                       (just #::znode{:type ::znode/created!})
+                                                       (just #::znode{:type ::znode/created! :stat (stat? {})})
                                                        (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})
                                                        (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
                                                                       :inserted #{} :removed #{}})}))
@@ -151,7 +167,7 @@
             $child (add-descendant $root "/child" 0)]
         (with-connection $root (str connect-string sandbox) 500
           $child => (eventually-streams 4 2000 (just #{#::znode{:type ::znode/watch-start}
-                                                       (just #::znode{:type ::znode/created!})
+                                                       (just #::znode{:type ::znode/created! :stat (stat? {})})
                                                        (just #::znode{:type ::znode/datum :value 0 ::znode/stat (stat? {:version 0})})
                                                        (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
                                                                       :inserted #{} :removed #{}})}))))
@@ -171,7 +187,7 @@
             $child1 (add-descendant $root1 "/child" 0)]
         (with-connection $root0 (str connect-string sandbox) 500
           $child0 => (eventually-streams 4 2000 (just #{#::znode{:type ::znode/watch-start}
-                                                        (just #::znode{:type ::znode/created!})
+                                                        (just #::znode{:type ::znode/created! :stat (stat? {})})
                                                         (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})
                                                         (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
                                                                        :inserted #{} :removed #{}})}))
@@ -192,7 +208,7 @@
             $child1 (add-descendant $root1 "/child" 0)]
         (with-connection $root0 (str connect-string sandbox) 500
           $child0 => (eventually-streams 4 2000 (just #{#::znode{:type ::znode/watch-start}
-                                                        (just #::znode{:type ::znode/created!})
+                                                        (just #::znode{:type ::znode/created! :stat (stat? {})})
                                                         (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})
                                                         (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
                                                                        :inserted #{} :removed #{}})})))
@@ -206,12 +222,12 @@
           $child1 => (eventually-streams 1 2000 ::timeout)
           $root1 => (has-ref-state [(stat? {:version 0}) anything (just #{$child1})]))))
 
-(fact "Root node behaves like leaves"
+(fact "Root node (which must exists) behaves like leaves"
       (let [$root (new-root "/" 10)]
         (with-connection $root (str connect-string sandbox) 500
           $root => (eventually-streams 4 2000 (just #{#::znode{:type ::znode/watch-start}
-                                                      (just #::znode{:type ::znode/created!})
-                                                      (just #::znode{:type ::znode/datum :value 10 :stat (stat? {:version 0})})
+                                                      (just #::znode{:type ::znode/exists :stat (stat? {})})
+                                                      (just #::znode{:type ::znode/datum :value :roomkey.znode/root :stat (stat? {:version 0})})
                                                       (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
                                                                      :inserted #{} :removed #{}})}))))
 
@@ -219,7 +235,7 @@
         (with-connection $root (str connect-string sandbox) 500
           $root => (eventually-streams 4 2000 (just #{#::znode{:type ::znode/watch-start}
                                                       (just #::znode{:type ::znode/exists :stat (stat? {:version 0})})
-                                                      (just #::znode{:type ::znode/datum :value 10 :stat (stat? {:version 0})})
+                                                      (just #::znode{:type ::znode/datum :value :roomkey.znode/root :stat (stat? {:version 0})})
                                                       (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
                                                                      :inserted #{} :removed #{}})})))))
 
@@ -228,7 +244,7 @@
             $child (add-descendant $root "/child" 0)]
         (with-connection $root (str connect-string sandbox) 500
           $child => (eventually-streams 4 3000 (just #{#::znode{:type ::znode/watch-start}
-                                                       (just #::znode{:type ::znode/created!})
+                                                       (just #::znode{:type ::znode/created! :stat (stat? {})})
                                                        (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})
                                                        (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
                                                                       :inserted #{} :removed #{}})}))
@@ -242,7 +258,7 @@
             $child (add-descendant $root "/child" 0)]
         (with-connection $root (str connect-string sandbox) 500
           $child => (eventually-streams 4 3000 (just #{#::znode{:type ::znode/watch-start}
-                                                       (just #::znode{:type ::znode/created!})
+                                                       (just #::znode{:type ::znode/created! :stat (stat? {})})
                                                        (just #::znode{:type ::znode/datum :value 0 :stat (stat? {:version 0})})
                                                        (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
                                                                       :inserted #{} :removed #{}})})))
@@ -263,12 +279,12 @@
             $zA (add-descendant $root "/myzref" "A")]
         (with-connection $root (str connect-string sandbox) 500
           $zA => (eventually-streams 4 3000 (just #{#::znode{:type ::znode/watch-start}
-                                                    (just #::znode{:type ::znode/created!})
+                                                    (just #::znode{:type ::znode/created! :stat (stat? {})})
                                                     (just #::znode{:type ::znode/datum :value "A" :stat (stat? {:version 0})})
                                                     (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
                                                                    :inserted #{} :removed #{}})}))
           $zB => (eventually-streams 4 3000 (just #{#::znode{:type ::znode/watch-start}
-                                                    (just #::znode{:type ::znode/created!})
+                                                    (just #::znode{:type ::znode/created! :stat (stat? {})})
                                                     (just #::znode{:type ::znode/datum :value "B" :stat (stat? {:version 0})})
                                                     (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
                                                                    :inserted #{} :removed #{}})})))
@@ -283,19 +299,19 @@
         (with-open [c (zoo/connect (str connect-string sandbox))]
           (with-connection $root (str connect-string sandbox) 500
             $z0 => (eventually-streams 4 3000 (just #{#::znode{:type ::znode/watch-start}
-                                                      (just #::znode{:type ::znode/created!})
+                                                      (just #::znode{:type ::znode/created! :stat (stat? {})})
                                                       (contains #::znode{:type ::znode/datum :value "A"})
                                                       (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
                                                                      :inserted #{} :removed #{}})}))
             $z1 => (eventually-streams 4 3000 (just #{#::znode{:type ::znode/watch-start}
-                                                      (just #::znode{:type ::znode/created!})
+                                                      (just #::znode{:type ::znode/created! :stat (stat? {})})
                                                       (contains #::znode{:type ::znode/datum :value (having-metadata {:my "znode"} {:foo 1})})
-                                                      (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
+                                                      (just #::znode{:type ::znode/children-changed :stat (stat? {:cversion 0})
                                                                      :inserted #{} :removed #{}})}))
             $z2 => (eventually-streams 4 3000 (just #{#::znode{:type ::znode/watch-start}
-                                                      (just #::znode{:type ::znode/created!})
+                                                      (just #::znode{:type ::znode/created! :stat (stat? {})})
                                                       (contains #::znode{:type ::znode/datum :value (having-metadata [] nil)})
-                                                      (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
+                                                      (just #::znode{:type ::znode/children-changed :stat (stat? {:cversion 0})
                                                                      :inserted #{} :removed #{}})}))
             (zoo/set-data c "/myzref0" (.getBytes "^{:my 1} [\"B\"]") 0)
             $z0 => (eventually-streams 1 3000 (just [(contains #::znode{:type ::znode/datum :value (having-metadata ["B"] {:my 1})})]))))))
@@ -305,9 +321,9 @@
         (with-open [c (zoo/connect (str connect-string sandbox))]
           (with-connection $root (str connect-string sandbox) 500
             $root => (eventually-streams 4 3000 (just #{#::znode{:type ::znode/watch-start}
-                                                        (just #::znode{:type ::znode/created!})
+                                                        (just #::znode{:type ::znode/exists :stat (stat? {})})
                                                         (contains #::znode{:type ::znode/datum})
-                                                        (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
+                                                        (just #::znode{:type ::znode/children-changed :stat (stat? {:cversion 0})
                                                                        :inserted #{} :removed #{}})}))
             (zoo/create c "/child" :data (.getBytes "^{:my 1} [\"B\"]"))
             (Thread/sleep 200))
@@ -329,22 +345,22 @@
             $grandchild (add-descendant $root "/child0/grandchild" 0)]
         (with-connection $root (str connect-string sandbox) 500
           $root => (eventually-streams 4 3000 (just #{#::znode{:type ::znode/watch-start}
-                                                      (just #::znode{:type ::znode/created!})
+                                                      (just #::znode{:type ::znode/exists :stat (stat? {})})
                                                       (contains #::znode{:type ::znode/datum :value ::znode/root})
                                                       (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
                                                                      :inserted #{} :removed #{}})}))
           $child0 => (eventually-streams 4 3000 (just #{#::znode{:type ::znode/watch-start}
-                                                        (just #::znode{:type ::znode/created!})
+                                                        (just #::znode{:type ::znode/created! :stat (stat? {})})
                                                         (contains #::znode{:type ::znode/datum :value 0})
                                                         (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
                                                                        :inserted #{} :removed #{}})}))
           $child1 => (eventually-streams 4 3000 (just #{#::znode{:type ::znode/watch-start}
-                                                        (just #::znode{:type ::znode/created!})
+                                                        (just #::znode{:type ::znode/created! :stat (stat? {})})
                                                         (contains #::znode{:type ::znode/datum :value #{1 2 3}})
                                                         (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
                                                                        :inserted #{} :removed #{}})}))
           $grandchild => (eventually-streams 4 3000 (just #{#::znode{:type ::znode/watch-start}
-                                                            (just #::znode{:type ::znode/created!})
+                                                            (just #::znode{:type ::znode/created! :stat (stat? {})})
                                                             (contains #::znode{:type ::znode/datum :value 0})
                                                             (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
                                                                            :inserted #{} :removed #{}})}))
@@ -356,12 +372,12 @@
             $child (add-descendant $root "/child" 0)]
         (with-connection $root (str connect-string sandbox) 500
           $root => (eventually-streams 4 3000 (just #{#::znode{:type ::znode/watch-start}
-                                                      (just #::znode{:type ::znode/created!})
+                                                      (just #::znode{:type ::znode/exists :stat (stat? {})})
                                                       (contains #::znode{:type ::znode/datum :value ::znode/root})
                                                       (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
                                                                      :inserted #{} :removed #{}})}))
           $child => (eventually-streams 4 3000 (just #{#::znode{:type ::znode/watch-start}
-                                                       (just #::znode{:type ::znode/created!})
+                                                       (just #::znode{:type ::znode/created! :stat (stat? {})})
                                                        (contains #::znode{:type ::znode/datum :value 0})
                                                        (just #::znode{:type ::znode/children-changed :stat (stat? {:version 0})
                                                                       :inserted #{} :removed #{}})}))

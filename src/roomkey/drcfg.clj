@@ -28,19 +28,20 @@
   ([connect-string scope] (db-initialize! connect-string scope 8000))
   ([connect-string scope timeout]
    (let [drcfg-root (znode/new-root (str "/" zk-prefix))
-         data (async/pipe drcfg-root
-                          (async/chan 1 (comp (filter (comp #{:roomkey.znode/datum :roomkey.znode/created!} :roomkey.znode/type))
-                                              (map :roomkey.znode/type)))
-                          false)
-         root (if scope (znode/add-descendant drcfg-root (str "/" scope) ::scoped-root) drcfg-root)]
-     (with-open [^java.io.Closeable zclient (znode/open drcfg-root connect-string timeout)]
-       (when-let [result (async/<!! (async/go-loop []
-                                      (async/alt! data ([event] (case event
-                                                                  :roomkey.znode/created! (do (log/infof "Database initialized") (recur))
-                                                                  :roomkey.znode/datum true))
-                                                  (async/timeout (* 2 timeout)) ([_] (log/warnf "Timed out waiting for database initialization") false))))]
+         root (if scope (znode/add-descendant drcfg-root (str "/" scope) ::scoped-root) drcfg-root)
+         data (async/pipe root
+                          (async/chan 1 (comp (map :roomkey.znode/type)
+                                              (filter #{:roomkey.znode/watch-start :roomkey.znode/exists :roomkey.znode/created!})))
+                          false)]
+     (with-open [^java.io.Closeable _ (znode/open drcfg-root connect-string timeout)]
+       (when (async/alt!! (async/go
+                            (assert (= (async/<! data) :roomkey.znode/watch-start))
+                            (znode/create! drcfg-root)
+                            (async/alt! data ([event] (do (case event
+                                                            :roomkey.znode/created! (log/infof "Database initialized")
+                                                            :roomkey.znode/exists (log/infof "Database already initialized")))))) true
+                          (async/timeout (* 2 timeout)) ([_] (log/warnf "Timed out waiting for database initialization") false))
          (log/infof "Database ready at %s [%s]" connect-string (str root))
-         (Thread/sleep (/ timeout 10)) ; let ZNode acquisition settle down solely to avoid innocuous "Lost connection while processing" errors.
          root)))))
 
 (defn ^roomkey.zref.ZRef >-
