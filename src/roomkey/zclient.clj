@@ -158,24 +158,23 @@
     (try (stat-to-map (with-client (.setData client path data version)))
          (catch KeeperException e
            (when-not (= (.code e) KeeperException$Code/BADVERSION) (throw e)))))
-  (data [this path {:keys [watcher watch?] :or {watch? false}}]
+  (data [this path {:keys [^Watcher watcher watch?] :or {watch? false}}]
     (let [stat (Stat.)]
       {:data (with-client ^bytes (if watcher
                                    (.getData client ^String path (if (instance? Watcher watcher) watcher (make-watcher watcher)) stat)
                                    (.getData client ^String path ^boolean watch? stat)))
        :stat (stat-to-map stat)}))
-  (children [this path {:keys [watcher watch?] :or {watch? false}}]
+  (children [this path {:keys [^Watcher watcher watch?] :or {watch? false}}]
     (let [stat (Stat.)]
       {:children (into () (with-client ^java.util.List (if watcher
                                                          (.getChildren client ^String path (if (instance? Watcher watcher) watcher (make-watcher watcher)) stat)
                                                          (.getChildren client ^String path ^boolean watch? stat))))
        :stat (stat-to-map stat)}))
-  (exists [this path {:keys [watcher watch?] :or {watch? false}}]
-    (let [w (if watcher  watch?)]
-      (when-let [stat (with-client ^Stat (if watcher
-                                           (.exists client ^String path (if (instance? Watcher watcher) watcher (make-watcher watcher)))
-                                           (.exists client ^String path ^boolean watch?)))]
-        (stat-to-map stat))))
+  (exists [this path {:keys [^Watcher watcher watch?] :or {watch? false}}]
+    (when-let [stat (with-client ^Stat (if watcher
+                                         (.exists client ^String path (if (instance? Watcher watcher) watcher (make-watcher watcher)))
+                                         (.exists client ^String path ^boolean watch?)))]
+      (stat-to-map stat)))
 
   clojure.core.async.Mult
   (tap* [m ch close?] (async/tap* mux ch close?))
