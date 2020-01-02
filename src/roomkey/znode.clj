@@ -76,7 +76,7 @@
   "Return a handler for client connection loss that closes the node event channel"
   [znode c]
   (fn [e type]
-    (log/infof "Unrecoverable client error (%s) on %s, shutting down watch" type (str znode))
+    (log/debugf "Unrecoverable client error (%s) on %s, shutting down watch" type (str znode))
     (async/close! c)
     nil))
 
@@ -102,7 +102,7 @@
     this)
   (update-or-add-child [this path v]
     (let [z' (default client path v)]
-      (.get ^clojure.lang.ITransientSet (conj! this z') z')))
+      (get ^clojure.lang.ITransientSet (conj! this z') z')))
   (signature [this] (dosync
                      (transduce (map signature)
                                 (fn accumulate-independently-then-hash
@@ -171,7 +171,7 @@
                                                      [ins rem persist] [rmt+ (if boot? #{} lcl+) (if boot? lcl+ #{})]
                                                      cws (async/<! (async/into (apply dissoc cws rem) (async/merge (map watch rmt+))))]
                                                  (async/thread (doseq [child persist] ; these should be async fire-and-forget...
-                                                                 (assert (zclient/with-connection handle-connection-loss (.create! child)))))
+                                                                 (assert (zclient/with-connection handle-connection-loss (create! child)))))
                                                  (when (or (seq ins) (seq rem) boot?)
                                                    (async/>! children-events {::type ::children-changed ::stat stat ::inserted ins ::removed rem}))
                                                  (recur cws))
