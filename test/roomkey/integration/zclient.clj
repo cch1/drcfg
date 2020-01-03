@@ -72,6 +72,21 @@
           (delete $client "/myznode/child" 0 {}) => truthy
           (delete $client "/myznode" 1 {}) => truthy)))
 
+(fact "Client expiration is handled gracefully"
+      (with-open [$t0 (TestingServer. true)]
+        (let [$cstring (.getConnectString $t0)
+              $c (async/chan 1)
+              $zclient (create)]
+          (async/tap $zclient $c)
+          (with-open [_ (open $zclient $cstring 5000)]
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])])
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])
+            ;; Provoke expiration via "official" approach: https://zookeeper.apache.org/doc/r3.5.5/api/org/apache/zookeeper/Testable.html
+            (.injectSessionExpiration (.getTestable @(.client-atom $zclient)))
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/expired (partial instance? ZooKeeper)])])
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])])
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/connected (partial instance? ZooKeeper)])])))))
+
 (fact "Can open client to unavailable server"
       (with-open [$t0 (TestingServer. false)
                   $t1 (TestingServer. (.getPort $t0) false)]
@@ -90,10 +105,12 @@
             (.stop $t0)
             (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/disconnected (partial instance? ZooKeeper)])])
             (log/debug ">>>>>>>>>> About to start a new server -should trigger expiration of existing sessions <<<<<<")
-            (.start $t1)
-            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/expired (partial instance? ZooKeeper)])])))))
+            (.start $t1) ; Provoke expiration via our custom approach.
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/expired (partial instance? ZooKeeper)])])
+            (async/alts!! [$c (async/timeout 2500)]) => (contains [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])])
+            ))))
 
-(fact "Client survives session expiration"
+(fact "Client survives session migration to alternate cluster server"
       (with-open [$t (TestingCluster. 3)]
         (let [$cstring (.getConnectString $t)
               $c (async/chan 1)
