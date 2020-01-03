@@ -10,8 +10,7 @@
             ZooDefs$Ids
             data.Stat]
            (java.time Instant OffsetDateTime))
-  (:require [clojure.string :as string]
-            [clojure.core.async :as async]
+  (:require [clojure.core.async :as async]
             [clojure.tools.logging :as log]))
 
 (def acls {:open-acl-unsafe ZooDefs$Ids/OPEN_ACL_UNSAFE ; This is a completely open ACL
@@ -191,15 +190,13 @@
         (throw (clojure.lang.ArityException. n (.. this (getClass) (getSimpleName)))))))
 
   java.lang.Object
-  (toString [this] (format "%s: %s"
-                           (.. this (getClass) (getSimpleName))
+  (toString [this] (format "ℤℂ: %s"
                            (if-let [client @client-atom]
-                             (let [server (last (re-find #"remoteserver:(\S+)" (.toString ^ZooKeeper client))) ; FIXME: get the remote server cleanly
-                                   b (bean client)]
-                               (format "ZooKeeper@%08x State:%s sessionId:0x%15x server:%s"
+                             (let [server (last (re-find #"remoteserver:(\S+)" (.toString ^ZooKeeper client)))] ; FIXME: get server cleanly via `cnxn` field
+                               (format "@%08x State:%s sessionId:0x%15x server:%s"
                                        (System/identityHashCode client)
-                                       (:state b)
-                                       (:sessionId b)
+                                       (.getState client)
+                                       (.getSessionId client)
                                        server))
                              "<No Raw Client>"))))
 

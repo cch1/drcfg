@@ -249,7 +249,7 @@
   java.lang.Object
   (equals [this other] (and (= (class this) (class other)) (= (.path this) (.path ^ZNode other)) (= (.client this) (.client ^ZNode other))))
   (hashCode [this] (.hashCode [path client]))
-  (toString [this] (format "%s: %s" (.. this (getClass) (getSimpleName)) path)))
+  (toString [this] (str "ℤℕ:" path)))
 
 (defn ^roomkey.znode.ZNode default ; NB: This operation does not update the children of the parent
   ([client path] (default client path ::unknown))
@@ -358,12 +358,13 @@
 
 ;; https://stackoverflow.com/questions/49373252/custom-pprint-for-defrecord-in-nested-structure
 ;; https://stackoverflow.com/questions/15179515/pretty-printing-a-record-using-a-custom-method-in-clojure
-(remove-method clojure.core/print-method roomkey.znode.ZNode)
 (defmethod clojure.core/print-method ZNode
   [^roomkey.znode.ZNode znode ^java.io.Writer writer]
-  (.write writer (format "#<%s %s>" (.. znode (getClass) (getSimpleName)) (.path znode))))
+  (.write writer "#")
+  (.write writer (.. znode (getClass) (getSimpleName)))
+  (.write writer " ")
+  (print-simple znode writer) #_ (.write writer (format "#<%s %s>" (.. znode (getClass) (getSimpleName)) (.path znode))))
 
-(remove-method clojure.pprint/simple-dispatch ZNode)
 (defmethod clojure.pprint/simple-dispatch ZNode
   [^roomkey.znode.ZNode znode]
   (pr znode))

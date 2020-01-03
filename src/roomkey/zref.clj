@@ -114,7 +114,7 @@
   (swap [this f x y] (.swap this (fn [v] (f v x y))))
   (swap [this f x y args] (.swap this (fn [v] (apply f v x y args))))
   java.lang.Object
-  (toString [this] (format "%s: %s [version %d]" (.getName (class this)) (.path ^roomkey.znode.ZNode znode) (last (.vDeref this)))))
+  (toString [this] (format "ℤℝ: %s @%d" (.path ^roomkey.znode.ZNode znode) (last (.vDeref this)))))
 
 (defn ^roomkey.zref.ZRef create
   [root-znode path default & options]

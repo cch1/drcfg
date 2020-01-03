@@ -147,12 +147,12 @@
 (fact "Client renders toString nicely"
       (let [events (async/chan 1)
             $c (create)]
-        (.toString $c) => #"ZClient: <No Raw Client>"
+        (str $c) => #"ℤℂ: <No Raw Client>"
         (with-open [_ (open $c $cstring0 5000)]
           (async/<!! (async/tap $c events)) => (just [:roomkey.zclient/connected (partial instance? ZooKeeper)])
-          (.toString $c) => #"ZClient: ZooKeeper@([0-9a-f]+) State:[A-Z]+ sessionId:0x[0-9a-f]+ server:.+:\d+")
+          (str $c) => #"ℤℂ: @([0-9a-f]+) State:[A-Z]+ sessionId:0x[0-9a-f]+ server:.+:\d+")
         (Thread/sleep 500)
-        (.toString $c) => #"ZClient: <No Raw Client>"))
+        (str $c) => #"ℤℂ: <No Raw Client>"))
 
 (fact "Client support IFn"
       (let [$c (create)]
