@@ -126,7 +126,8 @@
                      :SyncConnected (async/>! client-events [::connected @client-atom])
                      :Disconnected (async/>! client-events [::disconnected @client-atom])
                      :Expired (let [z' (new-client)]
-                                ;; Do we need to close the old client?
+                                (async/<! (async/thread (when-not (.close ^ZooKeeper @client-atom timeout)
+                                                          (log/warnf "%s did not shut down cleanly" (str this)))))
                                 (async/>! client-events [::expired @client-atom])
                                 (swap! client-atom (constantly z'))
                                 (async/>! client-events [::started @client-atom])
