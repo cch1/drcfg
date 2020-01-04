@@ -146,42 +146,41 @@
       ;; https://www.safaribooksonline.com/library/view/zookeeper/9781449361297/ch04.html
       (async/go
         (async/>! events {::type ::watch-start})
-        (let [stat (async/<! (zop zclient/exists))]
-          (when stat
-            (async/>! stat-events {::type ::exists ::stat stat})
-            (async/>! znode-events {:event-type ::Boot :keeper-state ::Boot}))
-          [this (async/go-loop [cws (async/<! (async/into {} (async/merge (map watch @children))))]
-                  (if-let [{:keys [event-type keeper-state] :as event} (async/<! znode-events)]
-                    (do
-                      (log/tracef "Event [%s:%s] for %s" event-type keeper-state (str this))
-                      (case event-type
-                        :None (do (async/close! znode-events) (recur cws))
-                        :NodeCreated (let [stat (async/<! (zop zclient/exists))]
-                                       (async/>! stat-events {::type ::created! ::stat stat})
-                                       (async/>! znode-events {:event-type ::Boot :keeper-state ::Boot})
-                                       (recur cws))
-                        :NodeDeleted (do (async/>! events {::type ::deleted!}) (async/close! znode-events) (recur cws))
-                        :NodeDataChanged (do (async/pipe (zop zclient/data) data-events false) (recur cws))
-                        :NodeChildrenChanged (if-let [{:keys [children stat]} (async/<! (zop zclient/children))]
-                                               (let [lcl (into #{} (map key) cws)
-                                                     rmt (into #{} (comp (map (partial str path-prefix))
-                                                                         (map #(update-or-add-child this % ::placeholder))) children)
-                                                     [lcl+ rmt+] (delta lcl rmt)
-                                                     boot? (= ::Boot keeper-state)
-                                                     [ins rem persist] [rmt+ (if boot? #{} lcl+) (if boot? lcl+ #{})]
-                                                     cws (async/<! (async/into (apply dissoc cws rem) (async/merge (map watch rmt+))))]
-                                                 (async/thread (doseq [child persist] ; these should be async fire-and-forget...
-                                                                 (assert (zclient/with-connection handle-connection-loss (create! child)))))
-                                                 (when (or (seq ins) (seq rem) boot?)
-                                                   (async/>! children-events {::type ::children-changed ::stat stat ::inserted ins ::removed rem}))
-                                                 (recur cws))
+        (when-let [stat (async/<! (zop zclient/exists))]
+          (async/>! stat-events {::type ::exists ::stat stat})
+          (async/>! znode-events {:event-type ::Boot :keeper-state ::Boot}))
+        [this (async/go-loop [cws (async/<! (async/into {} (async/merge (map watch @children))))]
+                (if-let [{:keys [event-type keeper-state] :as event} (async/<! znode-events)]
+                  (do
+                    (log/tracef "Event [%s:%s] for %s" event-type keeper-state (str this))
+                    (case event-type
+                      :None (do (async/close! znode-events) (recur cws))
+                      :NodeCreated (let [stat (async/<! (zop zclient/exists))]
+                                     (async/>! stat-events {::type ::created! ::stat stat})
+                                     (async/>! znode-events {:event-type ::Boot :keeper-state ::Boot})
+                                     (recur cws))
+                      :NodeDeleted (do (async/>! events {::type ::deleted!}) (async/close! znode-events) (recur cws))
+                      :NodeDataChanged (do (async/pipe (zop zclient/data) data-events false) (recur cws))
+                      :NodeChildrenChanged (if-let [{:keys [children stat]} (async/<! (zop zclient/children))]
+                                             (let [lcl (into #{} (map key) cws)
+                                                   rmt (into #{} (comp (map (partial str path-prefix))
+                                                                       (map #(update-or-add-child this % ::placeholder))) children)
+                                                   [lcl+ rmt+] (delta lcl rmt)
+                                                   boot? (= ::Boot keeper-state)
+                                                   [ins rem persist] [rmt+ (if boot? #{} lcl+) (if boot? lcl+ #{})]
+                                                   cws (async/<! (async/into (apply dissoc cws rem) (async/merge (map watch rmt+))))]
+                                               (async/thread (doseq [child persist] ; these should be async fire-and-forget...
+                                                               (assert (zclient/with-connection handle-connection-loss (create! child)))))
+                                               (when (or (seq ins) (seq rem) boot?)
+                                                 (async/>! children-events {::type ::children-changed ::stat stat ::inserted ins ::removed rem}))
                                                (recur cws))
-                        ::Boot (do (async/>! znode-events {:event-type :NodeDataChanged :keeper-state ::Boot})
-                                   (async/>! znode-events {:event-type :NodeChildrenChanged :keeper-state ::Boot})
-                                   (recur cws))))
-                    (do (async/>! events {::type ::watch-stop})
-                        (log/tracef "The event channel closed; shutting down %s" (str this))
-                        (async/<! (async/reduce + 1 (async/merge (vals cws)))))))]))))
+                                             (recur cws))
+                      ::Boot (do (async/>! znode-events {:event-type :NodeDataChanged :keeper-state ::Boot})
+                                 (async/>! znode-events {:event-type :NodeChildrenChanged :keeper-state ::Boot})
+                                 (recur cws))))
+                  (do (async/>! events {::type ::watch-stop})
+                      (log/tracef "The event channel closed; shutting down %s" (str this))
+                      (async/<! (async/reduce + 1 (async/merge (vals cws)))))))])))
 
   clojure.lang.Named
   (getName [this] (let [segments (string/split path #"/")] (or (last segments) "")))
