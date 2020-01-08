@@ -10,7 +10,7 @@ an entire ZooKeeper (sub-)tree.
 
 ## License
 
-Copyright (C) 2019 [RoomKey](http://www.roomkey.com)
+Copyright (C) 2020 [RoomKey](http://www.roomkey.com)
 
 ## drcfg notes
 
@@ -53,7 +53,7 @@ and the metadata on the ZRef (not the var) will be truncated:
 
 	(meta myz) => {:verison -1}
 
-ZRefs are each paired with a ZNode which proxies the persisted ZooKeeper znode.  All connectivity is managed by ZNodes.
+Each ZRef is backed by a ZNode which proxies the persisted ZooKeeper znode.  All connectivity is managed by ZNodes.
 
 The root ZNode (`roomkey.drcfg/*root*`) is the starting point to which all child nodes are attached.
 
@@ -67,9 +67,9 @@ via the root ZNode using the `roomkey.drcfg/open` function.
 (drcfg/open "zk1.my.co:2181,zk2.my.co:2181,zk3.my.co:2181")
 ```
 
-This will open a connection to the specified ZooKeeper cluster.  Upon connection, all previously created ZNodes will be linked to their cooresponding ZooKeeper nodes and any ZRefs will transitively be connected.  The returned client (an instance of `roomkey.zclient.ZClient`) should be retained for eventual closing.  Note that the prefix `"drcfg"` is automatically added to the provided ZooKeeper connection string to effectively scope the drcfg nodes.
+This will open a connection to the specified ZooKeeper cluster.   The returned value (an instance of `java.io.Closeable`) should be retained for eventual closing.  Note that the prefix `"drcfg"` is automatically added to the provided ZooKeeper connection string to effectively scope the drcfg nodes.
 
-Immediately upon connecting, ZNodes read their current value from the cluster.  If the ZNode has never before been persisted, it is created with a default value (normally the default value assigned to the ZRef).  If the ZNode does exist, the value stored at the cluster will be read and subsequently update the ZRef, causing dereferencing to yield the updated value:
+Upon connection, all previously created ZNodes will be linked to their cooresponding ZooKeeper nodes and any ZRefs will transitively be connected.   Immediately upon connecting, ZNodes read their current value from the cluster.  If the ZNode does exist, the value stored at the cluster will be read and subsequently update the ZRef, causing dereferencing to yield the updated value:
 
 	@myz => "foo"
 
@@ -77,7 +77,9 @@ Metadata too is updated:
 
 	(meta myz) => {:dataLength 5, :numChildren 1, :pzxid 64, :aversion 0, :ephemeralOwner 0, :cversion 1, :ctime 1412349368172, :czxid 63, :mzxid 4295232539, :version 6, :mtime 1469675813189}
 
-From this point on, a ZooKeeper watch is kept on the associated node and any updates will be reflected in `myz`.
+When a ZNode initially establishes a connection to the ZooKeeper cluster, it will create any missing children and set their value to the ZNode's local value (such as the default value assigned to the ZRef).  Any existing znodes found on the cluster are acquired locally and ZNodes are created for them.
+
+From this point on, a ZooKeeper watch is kept on the associated node and any updates to its data or children will be reflected in `myz` and its child ZNodes.
 
 When the application shuts down, you should release resources associated with the previously opened ZClient:
 
@@ -88,8 +90,10 @@ Note that the opening and closing of the ZClient can be neatly managed by state 
 #### Writes
 ZRefs can be updated in the same fashion as Clojure's own atom.  Updates are written *synchronously* to the cluster.  See the section below on protocols for enhanced usage with versioning semantics.  **Keep in mind that reads will not reflect the current value until the watch on the ZooKeeper node has been fired and the client has received the update.**  This typically happens in milliseconds but is obviously dependent on your specific implementation of the ZooKeeper cluster.
 
-### Dependencies
+#### Database Initialization
+A drcfg tree of znodes must be initialized by creating the root ZNode.  The `drcfg/db-initialize!` function will perform this operation.
 
+### Dependencies
 The current version of drcfg has dropped Apache Curator in favor of direct use of the [official java ZooKeeper library](http://zookeeper.apache.org/releases.html#download).  In addition, Clojure's [core.async](https://clojure.github.io/core.async/index.html) is used to manage communication of connectivity events between ZRefs and their paired ZNodes as well as between ZNodes and the ZClient.
 
 ### Global State
@@ -171,7 +175,7 @@ applyTo - further support for ZNodes as functions of the paths of their descenda
 * hasheq - For purposes of equality, the reference state of a ZNode is *not* considered and only the path and client matter.
 
 #### clojure.core.async.impl.protocols.ReadPort
-* take! - Allows a ZNode to act as a read-only async channel yield event values
+* take! - Allows a ZNode to act as a read-only async channel yielding events.
 
 #### clojure.core.async.impl.protocols.Channel
 * close! - Allows a ZNode to cease watching the cluster-persisted ZNode
@@ -188,13 +192,12 @@ In addition to the above standard clojure interfaces, ZNodes also support severa
 * create! - Create the ZNode backing this virtual node
 * delete! - Delete the ZNode, asserting the current version
 * compare-version-and-set! - Atomically set the value of the ZNode if and only if the current version is supplied.
-* watch - Recursively watch the ZNode and its children.
-* actualize! - Recursively persist the ZNode and its children.
-* signature - Return a (Clojure hash equivalent) signature of the state of the subtree at this ZNode.
+* watch - Recursively watch the ZNode and its children.  During the boot phase of a ZNode, children are persisted to the cluster if they are found to be missing.  Thereafter, children _removed_ at the cluster are also removed locally.
 
 #### roomkey.znode.VirtualNode
 * update-or-add-child - Update the existing child or create a new child of the ZNode at the given path.
 * overlay - Overlay the existing placeholder ZNode's value with a concrete value
+* signature - Return a (Clojure hash equivalent) signature of the state of the subtree at this ZNode.
 
 ### Avoiding incessant logging from curator and zookeeper
 

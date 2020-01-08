@@ -6,8 +6,8 @@ It's a pain in the ass to have to create both nodes (X and X.metadata).  A tuple
 ## Support async calls to zookeeper lib
 
 ## Move reporting to separate namespace
- * Use this to get used zrefs: echo wchp | nc 127.0.0.1 2181 | grep drcfg | sort
+ * Use this to get used zrefs: echo wchp | nc zk1.c0pt3r.local 2181 | grep / | sort
 
 ## Call `removeAllWatches` on ZNode shutdown once server is on version >= 3.5.0
 
-## Call `create` on ZNode to return Stat structure once server is on (presumably) version >= 3.5.0
+## Warn on out-of-order stat reception -could easily be added as a stateful transducer on ZNode event.
