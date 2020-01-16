@@ -408,3 +408,20 @@
           $grandchild => (eventually-streams 4 3000 (contains #{#::znode{:type ::znode/watch-start}})))
         (znode/walk (str connect-string sandbox) 500 identity conj ()) => (contains #{(znode-at "/") (znode-at "/child0")
                                                                                       (znode-at "/child1") (znode-at "/child0/grandchild")})))
+
+(defchecker named? [expected]
+  (checker [actual] (= (name actual) expected)))
+
+(fact "The tree can be walked with proper treatment of transducer and scope"
+      (let [$root (new-root)
+            $c0 (add-descendant $root "/c0" "c0")
+            $gc10 (add-descendant $c0 "/gc10" "gc10")
+            $gc11 (add-descendant $c0 "/gc11" "gc11")
+            $blacksheep (add-descendant $c0 "/blacksheep" "baa")]
+        (with-connection $root (str connect-string sandbox) 8000
+          $gc10 => (eventually-streams 4 3000 (contains #{#::znode{:type ::znode/watch-start}}))
+          $gc11 => (eventually-streams 4 3000 (contains #{#::znode{:type ::znode/watch-start}}))
+          $blacksheep => (eventually-streams 4 3000 (contains #{#::znode{:type ::znode/watch-start}})))
+        (walk (str connect-string sandbox "/c0") 500 (remove #(re-find #"b" (name %))) conj ())
+        => (every-checker (has every? (partial instance? roomkey.znode.ZNode))
+                          (just #{(named? "") (named? "gc10") (named? "gc11")}))))
