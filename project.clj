@@ -1,6 +1,6 @@
 (defproject com.roomkey/drcfg :lein-v
   :description "Dynamic Runtime Configuration Utility based on Zookeeper"
-  :url "https://github.com/roomkey/drcfg"
+  :url "https://github.com/cch1/drcfg"
   :plugins [[com.roomkey/lein-v "7.0.0"]]
   :middleware [lein-v.plugin/middleware]
   :license {:name "3-Clause BSD License"
