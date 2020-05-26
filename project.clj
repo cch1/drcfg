@@ -3,9 +3,8 @@
   :url "https://github.com/roomkey/drcfg"
   :plugins [[com.roomkey/lein-v "7.0.0"]]
   :middleware [lein-v.plugin/middleware]
-  :license {:name "Copyright Hotel JV Services LLC"
-            :distribution :manual
-            :comments "All rights reserved"}
+  :license {:name "3-Clause BSD License"
+            :url "https://opensource.org/licenses/BSD-3-Clause"}
   :aliases {"midje" ["with-profile" "+test" "midje"]}
   :release-tasks [["vcs" "assert-committed"]
                   ["v" "update"] ;; compute new version & tag it

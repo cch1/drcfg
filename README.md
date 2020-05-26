@@ -10,7 +10,9 @@ an entire ZooKeeper (sub-)tree.
 
 ## License
 
-Copyright (C) 2020 [RoomKey](http://www.roomkey.com)
+Copyright (C) 2020 Hotel JV Services, LLC
+
+See LICENSE for full license text.
 
 ## drcfg notes
 
