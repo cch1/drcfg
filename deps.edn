@@ -1,0 +1,5 @@
+{:deps {org.clojure/clojure {:mvn/version "1.10.1"}
+        org.clojure/tools.logging {:mvn/version "0.5.0"}
+        org.clojure/core.async {:mvn/version "0.6.532"}
+        org.clojure/tools.macro {:mvn/version "0.1.5"}
+        org.apache.zookeeper/zookeeper {:mvn/version "3.5.6"}}}
