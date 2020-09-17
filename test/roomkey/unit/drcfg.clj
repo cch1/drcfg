@@ -48,3 +48,9 @@
 
 (fact "def> can be evaluated"
       (def> ^:foo y "My Docstring" 2222) => (partial instance? clojure.lang.Var))
+
+(fact "def> can accept a validator"
+       (def> validated-value
+         [2 4 6]
+         :validator #(every? even? %))
+       (get-validator validated-value) => fn?)
