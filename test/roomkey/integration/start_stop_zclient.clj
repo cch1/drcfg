@@ -1,12 +1,17 @@
 (ns roomkey.integration.start-stop-zclient
   (:require [roomkey.zclient :refer :all]
-            [midje.sweet :refer :all]))
+            [midje.sweet :refer :all])
+  (:import [org.apache.curator.test TestingServer]))
 
-(def connect-string "zk1.c0pt3r.local,zk2.c0pt3r.local,zk3.c0pt3r.local")
+(def bad-connect-string "127.1.1.1:9999")
+(def good-connect-string (.getConnectString (TestingServer. true)))
+
 
 ;; NB: this test will succede even if the server(s) are unavailable -that's kinda the point of the test
 (fact "Can create a client, open it and then close it repeatedly"
       (let [$c (create)]
-        (for [n (range 5)]
+        (for [connect-string (concat (repeat 5 good-connect-string)
+                                     (repeat 5 bad-connect-string)
+                                     (repeatedly 5 #(rand-nth [good-connect-string bad-connect-string])))]
           (let [handle (open $c (str connect-string "/drcfg") 8000)]
-            (.close handle))) => (five-of nil)))
+            (.close handle))) => (n-of nil 15)))

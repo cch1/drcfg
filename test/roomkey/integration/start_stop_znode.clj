@@ -1,15 +1,16 @@
 (ns roomkey.integration.start-stop-znode
   (:require [roomkey.znode :refer :all]
-            [clojure.core.async :as async]
-            [clojure.tools.logging :as log]
-            [midje.sweet :refer :all]
-            [midje.checking.core :refer [extended-=]]))
+            [midje.sweet :refer :all])
+  (:import [org.apache.curator.test TestingServer]))
 
-(def connect-string "zk1.c0pt3r.local,zk2.c0pt3r.local,zk3.c0pt3r.local")
+(def bad-connect-string "127.1.1.1:9999")
+(def good-connect-string (.getConnectString (TestingServer. true)))
 
-(fact "Can create a client, open it and then close it repeatedly"
+(fact "Can create a new root, open it and then close it repeatedly"
       (let [$z (new-root)]
-        (for [n (range 6)]
+        (for [connect-string (concat (repeat 5 good-connect-string)
+                                     (repeat 5 bad-connect-string)
+                                     (repeatedly 5 #(rand-nth [good-connect-string bad-connect-string])))]
           (let [handle (open $z (str connect-string "/drcfg") 8000)]
             (Thread/sleep (rand-int 100))
-            (.close handle))) => (six-of nil?)))
+            (.close handle))) => (n-of nil? 15)))
