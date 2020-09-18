@@ -35,16 +35,19 @@
 (fact "def> expands correctly"
       (macroexpand-1 `(def> y {} :validator identity))
       => (just `(let ~(just [symbol? (just `(str "/" ~(just `(string/replace ~(just `(str *ns*)) #"\." "/")) "/" 'y))
-                             symbol? (just `(apply >- ~symbol? {} (:validator identity)))])
+                             symbol? (just `(>- ~symbol? {} :validator identity))])
                   ~(just `(when ~truthy
                             ~(just `(znode/add-descendant ~(just `(.znode ~symbol?)) "/.metadata" ~(just {})))))
                   ~(just `(def y ~symbol?))))
       (macroexpand-1 `(def> ^:foo y "My Documentation" [12] :validator identity))
       => (just `(let ~(just [symbol? (just `(str "/" ~(just `(string/replace ~(just `(str *ns*)) #"\." "/")) "/" 'y))
-                             symbol? (just `(apply >- ~symbol? [12] (:validator identity)))])
+                             symbol? (just `(>- ~symbol? [12] :validator identity))])
                   ~(just `(when ~truthy
                             ~(just `(znode/add-descendant ~(just `(.znode ~symbol?)) "/.metadata" ~(just {:doc "My Documentation" :foo true})))))
                   ~(just `(def y ~symbol?)))))
 
 (fact "def> can be evaluated"
       (def> ^:foo y "My Docstring" 2222) => (partial instance? clojure.lang.Var))
+
+(fact "def> installs the optional validator on the zref"
+      (get-validator (var-get (def> ^:foo y "My Docstring" 2222 :validator integer?))) => fn?)

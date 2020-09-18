@@ -113,6 +113,6 @@
         m (meta symb)
         options (mapcat identity (select-keys options [:validator]))]
     `(let [bpath# (str "/" (string/replace (str *ns*) #"\." "/") "/" '~symb)
-           ^roomkey.zref.ZRef z# (apply >- bpath# ~default ~options)]
+           ^roomkey.zref.ZRef z# (>- bpath# ~default ~@options)]
        (when ~m (znode/add-descendant (.znode z#) "/.metadata" ~m))
        (def ~symb z#))))
