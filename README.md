@@ -6,11 +6,9 @@ of [Apache Zookeeper](http://zookeeper.apache.org/).  ZNodes are a lighter-weigh
 an entire ZooKeeper (sub-)tree.
 
 ## Repository Owner
-[Chris Hapgood](mailto:chapgood@roomkey.com)
+[Chris Hapgood](mailto:cch1@hapgoods.com)
 
 ## License
-
-Copyright (C) 2020 Hotel JV Services, LLC
 
 See LICENSE for full license text.
 
@@ -239,3 +237,9 @@ default values.
 Note that the sample config stores data in `/tmp/zookeeper`, which will
 get blown away on a reboot. If you want to retain this data, change
 zoo.cfg to point dataDir to a more persistent directory.
+
+### Contributors
+These are the people that have contributed to drcfg.  Without them drcfg would have more bugs, fewer features and scant documentation.
+
+* Laverne Schrock
+* Adam Frey

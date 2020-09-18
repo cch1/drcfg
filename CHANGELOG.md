@@ -3,7 +3,17 @@ All notable changes to this project will be documented in this file. This change
 
 Note that versioning is managed using [lein-v](https://clojars.org/com.roomkey/lein-v).
 
-## [Unreleased](https://github.com/roomkey/drcfg/compare/v7.0.0...HEAD) ##
+## [Unreleased](https://github.com/roomkey/drcfg/compare/v7.1.0...HEAD) ##
+
+## [7.1.0](https://github.com/roomkey/drcfg/compare/v7.0.1...v7.1.0) ##
+
+### Fixed ###
+- Fixed bug in processing of `:validator` option.
+
+## [7.0.1](https://github.com/roomkey/drcfg/compare/v7.0.0...v7.0.1) ##
+
+### Changed ###
+- Converted to an open source project with proper license, documentation and deployment target.
 
 ## [7.0.0](https://github.com/roomkey/drcfg/compare/v6.6.1...v7.0.0) ##
 
