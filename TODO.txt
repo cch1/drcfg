@@ -1,5 +1,11 @@
+## Leverage the new persistent recursive watches introduced in Zookeeper 3.6 (https://zookeeper.apache.org/doc/r3.6.1/zookeeperProgrammers.html#sc_WatchPersistentRecursive)
+
 ## Consolidate metadata into existing ZNode
-It's a pain in the ass to have to create both nodes (X and X.metadata).  A tuple of [value, value-metadata, zref-metadata] would solve the problem nicely at the expense of needing a migration.
+It's a pain in the ass to have to create both nodes (X and X.metadata) to accommodate Var metadata.  Consider instead a tuple of [maybe-bearing-metadata-value, var-metadata] would solve the problem nicely at the expense of needing a migration.  Keep in mind that there are THREE sources of "metadata" in context:
+
+* Metadata on the def'd var: this metadata is typically source code references, docstrings, flags, etc.  Typically provided automatically by Clojure via the symbol naming the Var to be def'd.
+* Metadata on the value: this (optional) metadata can be provided by the user when defining or updating the ZRef value provided the value implements clojure.lang.IMeta.
+* Metadata on the ZRef: this metadata is synthesized into idiomatic Clojure metadata and is stored on the ZRef itself.  It is composed of the ZooKeeper znode metadata.
 
 ## Scrap extra scope (just prefix w/ "drcfg", and make that a configurable default)
 
