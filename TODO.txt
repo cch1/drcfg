@@ -1,3 +1,5 @@
+## Create placeholder intermediate znodes as CONTAINER (https://zookeeper.apache.org/doc/r3.6.2/apidocs/zookeeper-server/org/apache/zookeeper/CreateMode.html#CONTAINER) nodes.
+
 ## Leverage the new persistent recursive watches introduced in Zookeeper 3.6 (https://zookeeper.apache.org/doc/r3.6.1/zookeeperProgrammers.html#sc_WatchPersistentRecursive)
 
 ## Consolidate metadata into existing ZNode
