@@ -166,14 +166,18 @@
 
 (for-all
  [int gen/int]
- {:num-tests 5000}
+ {:num-tests 50}
  (fact "ZNodes have two kinds of \"consistent\" signatures" ; which are hopefully stable across many useful instances of the Clojure runtime
-       (let [$root (new-root)]
+       (let [$root (new-root)
+             $child (add-descendant $root "/a1" "a1")]
          (add-descendant $root "/a" "a")
          (add-descendant $root "/a/b0" "b0")
          (add-descendant $root "/a/b1" "b1")
-         (let [s (signature $root)]
-           (signature $root) => s))))
+         (let [[stat-signature value-signature :as s] (signature $root)
+               [stat-signature-child value-signature-child :as s-child] (signature $child)]
+           (signature $root) => s
+           (add-descendant $root "/a/b1/c1" "c1")
+           (signature $child) => s-child))))
 
 (for-all
  [int gen/int]
