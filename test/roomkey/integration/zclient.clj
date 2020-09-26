@@ -11,7 +11,6 @@
 (def bogus-host "127.1.1.1:9999")
 (def test-server (TestingServer. true))
 (def $cstring0 (.getConnectString test-server))
-(def $cstring1 "localhost:2181/drcfg")
 (def sandbox "/sandbox")
 
 (defchecker bytes-of [expected]
