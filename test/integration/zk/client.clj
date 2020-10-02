@@ -2,6 +2,7 @@
   (:require [zk.client :refer :all :as z]
             [clojure.core.async :as async]
             [clojure.tools.logging :as log]
+            [integration.zk.test-helper :refer [eventually-streams stat? event?]]
             [midje.sweet :refer :all]
             [midje.checking.core :refer [extended-=]])
   (:import [org.apache.curator.test TestingServer TestingCluster]
@@ -11,61 +12,35 @@
 (def bogus-host "127.1.1.1:9999")
 (def test-server (TestingServer. true))
 (def $cstring0 (.getConnectString test-server))
-(def $cstring1 "localhost:2181/drcfg")
-(def sandbox "/sandbox")
 
-(defchecker bytes-of [expected]
-  (checker [actual] (= (seq actual) (seq (.getBytes expected)))))
-
-(defn- streams [n timeout c]
-  "Captures the first `n` streamed elements of c subject to a timeout of `timeout` ms"
-  (let [result (async/alt!!
-                 (async/into [] (async/take n c 5)) ([v] (or v ::channel-closed))
-                 (async/timeout timeout) ([v] (or v ::timeout)))]
-    result))
-
-(defchecker eventually-streams [n timeout expected]
-  ;; The key to chatty checkers is to have the useful intermediate results be the evaluation of arguments to top-level expressions!
-  (chatty-checker [actual] (extended-= (streams n timeout actual) expected)))
-
-(fact "Can create and tap a client, then open it and close it with proper notifications arriving"
+(fact "Can create and open a client and close it with proper events arriving and connected state available"
       (let [events (async/chan 10)
             $c (create)]
         $c => (partial instance? ZClient)
         (connected? $c) => falsey
-        (async/tap $c events)
-        (with-open [_ (open $c $cstring0 5000)]
-          events => (eventually-streams 2 1000 (just [(just [::z/connecting (partial instance? ZooKeeper)])
-                                                      (just [::z/connected (partial instance? ZooKeeper)])]))
-          (connected? $c) => truthy)
-        events => (eventually-streams 1 3000 (just [(just [::z/closed (partial instance? ZooKeeper)])]))))
+        (let [handle (open $c $cstring0 {})]
+          handle => (eventually-streams 3 100 (just [::z/connecting ::z/connected ::z/watching]))
+          (connected? $c) => truthy
+          (.close handle) => nil
+          handle => (eventually-streams 2 1000 (just [::z/closing ::z/closed]))
+          (connected? $c) => falsey)))
 
-(fact "with-awaited-open works"
+(fact "with-open works"
       (let [$c (create)]
-        (with-awaited-open $c $cstring0 5000
+        (connected? $c) => falsey
+        (with-open [handle (open $c $cstring0 {})]
+          handle => (eventually-streams 3 100 (just [::z/connecting ::z/connected ::z/watching]))
           (connected? $c) => truthy)
+        (Thread/sleep 50) ; this is non-deterministic, but should suffice 99.9999% of the time for a fast local server.
         (connected? $c) => falsey))
 
-(defchecker stat? [expected]
-  ;; The key to chatty checkers is to have the useful intermediate results be the evaluation of arguments to top-level expressions!
-  (every-checker (contains {:version int?
-                            :cversion int?
-                            :aversion int?
-                            :ctime (partial instance? java.time.Instant)
-                            :mtime (partial instance? java.time.Instant)
-                            :mzxid pos-int?
-                            :czxid pos-int?
-                            :pzxid pos-int?
-                            :numChildren int?
-                            :ephemeralOwner int?
-                            :dataLength int?})
-                 (contains expected)))
-
-(defchecker event? [expected]
-  ;; The key to chatty checkers is to have the useful intermediate results be the evaluation of arguments to top-level expressions!
-  (every-checker (contains {:type keyword?
-                            :path string?})
-                 (contains expected)))
+(fact "while-watching works"
+      (let [$c (create)]
+        (connected? $c) => falsey
+        (while-watching [_ (open $c $cstring0 {})]
+          (connected? $c) => truthy
+          ::ok) => ::ok
+        (connected? $c) => falsey))
 
 ;; (fact "Client can perform operations on znodes"
 ;;       (let [test-server (TestingServer. true)
@@ -87,144 +62,120 @@
 ;;           (delete $client "/myznode/child" 0 {}) => truthy
 ;;           (delete $client "/myznode" 1 {}) => truthy)))
 
-;; (fact "Client can perform async operations on znodes"
-;;       (let [test-server (TestingServer. true)
-;;             c (async/chan 1)
-;;             $client (create)]
-;;         (async/tap $client c)
-;;         (with-open [_ (open $client (.getConnectString test-server) 5000)]
-;;           c  => (eventually-streams 2 3000 (just [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])
-;;                                                   (just [:roomkey.zclient/connected (partial instance? ZooKeeper)])]))
-;;           (let [c (async/chan 10)]
-;;             (create! $client "/myznode" c {:data (.getBytes "Hello World") :persistent? true}) => nil?
-;;             (async/<!! c) => (contains {:result :OK
-;;                                         :name "/myznode"
-;;                                         :path "/myznode"
-;;                                         :stat stat?})))))
-
 (fact "Client expiration is handled gracefully"
-      (with-open [$t0 (TestingServer. true)]
-        (let [$cstring (.getConnectString $t0)
-              $c (async/chan 1)
-              $zclient (create)]
-          (async/tap $zclient $c)
-          (with-open [_ (open $zclient $cstring 5000)]
-            $c => (eventually-streams 2 3000 (just [(just [::z/connecting (partial instance? ZooKeeper)])
-                                                    (just [::z/connected (partial instance? ZooKeeper)])]))
-            ;; Provoke expiration via "official" approach: https://zookeeper.apache.org/doc/r3.5.5/api/org/apache/zookeeper/Testable.html
-            (.injectSessionExpiration (.getTestable @(.client-atom $zclient)))
-            $c => (eventually-streams 3 3000 (just [(just [::z/closed (partial instance? ZooKeeper)])
-                                                    (just [::z/connecting (partial instance? ZooKeeper)])
-                                                    (just [::z/connected (partial instance? ZooKeeper)])]))))))
+      (let [$zclient (create)]
+        (while-watching [_ (open $zclient $cstring0 {})]
+          ;; Provoke expiration via "official" approach: https://zookeeper.apache.org/doc/r3.5.5/api/org/apache/zookeeper/Testable.html
+          (.injectSessionExpiration (.getTestable @(.client-atom $zclient)))
+          ::ok) => ::ok))
 
-(fact "Client can watch nodes persistently"
+(fact "Client will retry prior to the connection and watch being established"
       (with-open [$t0 (TestingServer. true)]
         (let [$cstring (.getConnectString $t0)
-              $zclient (create)
-              events (.watch $zclient "/" {:persistent? true :recursive? true})]
-          events => (partial instance? clojure.core.async.impl.channels.ManyToManyChannel)
-          (with-awaited-open $zclient $cstring 5000
+              $zclient (create)]
+          (with-open [_ (open $zclient $cstring {})]
             ($zclient #(.create % "/x" (.getBytes "Hi")
                                 org.apache.zookeeper.ZooDefs$Ids/OPEN_ACL_UNSAFE
-                                org.apache.zookeeper.CreateMode/PERSISTENT))
+                                org.apache.zookeeper.CreateMode/PERSISTENT)) => stat?
             ($zclient #(.create % "/x/y" (.getBytes "Hello")
                                 org.apache.zookeeper.ZooDefs$Ids/OPEN_ACL_UNSAFE
-                                org.apache.zookeeper.CreateMode/PERSISTENT))
-            (.injectSessionExpiration (.getTestable @(.client-atom $zclient)))
-            ($zclient #(.setData % "/x/y" (.getBytes "World") 0))
-            ($zclient #(.delete % "/x/y" 1)))
-          events => (eventually-streams 7 1000 (just [(event? {:type :NodeChildrenChanged :path "/"})
-                                                      (event? {:type :NodeCreated :path "/x"})
-                                                      (event? {:type :NodeChildrenChanged :path "/x"})
-                                                      (event? {:type :NodeCreated :path "/x/y"})
-                                                      (event? {:type :NodeDataChanged :path "/x/y"})
-                                                      (event? {:type :NodeChildrenChanged :path "/x"})
-                                                      (event? {:type :NodeDeleted :path "/x/y"})])))))
+                                org.apache.zookeeper.CreateMode/PERSISTENT)) => stat?
+            ($zclient #(.setData % "/x/y" (.getBytes "World") 0)) => stat?
+            ($zclient #(.delete % "/x/y" 1)) => nil?))))
 
-(fact "Can open client to unavailable server"
-      (with-open [$t0 (TestingServer. false)
-                  $t1 (TestingServer. (.getPort $t0) false)]
-        (let [$cstring (.getConnectString $t0)
-              $c (async/chan 1)
-              $zclient (create)]
-          (async/tap $zclient $c)
-          (with-open [_ (open $zclient $cstring 5000)]
-            $c => (eventually-streams 1 2500 (just [(just [::z/connecting (partial instance? ZooKeeper)])]))
+;; This test can expose issues with delays in getting the watch in place after opening the connection.  A delay
+;; could lead to not capturing events provoked by commands issued immediately after the connection opens.
+(fact "Client can watch nodes persistently"
+      (with-open [$t0 (TestingServer. true)]
+        (let [$zclient (create)]
+          (while-watching [handle (open $zclient (.getConnectString $t0) {})]
+            ($zclient #(.create % "/x" (.getBytes "Hi")
+                                org.apache.zookeeper.ZooDefs$Ids/OPEN_ACL_UNSAFE
+                                org.apache.zookeeper.CreateMode/PERSISTENT)) => "/x"
+            ($zclient #(.create % "/x/y" (.getBytes "Hello")
+                                org.apache.zookeeper.ZooDefs$Ids/OPEN_ACL_UNSAFE
+                                org.apache.zookeeper.CreateMode/PERSISTENT)) => "/x/y"
+            (.injectSessionExpiration (.getTestable @(.client-atom $zclient)))
+            ;; Race condition used to exist here where watch would not get set in time. Now we nil the raw client until watch is added
+            ($zclient #(stat-to-map (.setData % "/x/y" (.getBytes "World") 0))) => (stat? {})
+            ($zclient #(.delete % "/x/y" 1)) => nil
+            $zclient => (eventually-streams 7 4000 (just [(event? {:type :NodeCreated :path "/x"})
+                                                          (event? {:type :NodeChildrenChanged :path "/"})
+                                                          (event? {:type :NodeCreated :path "/x/y"})
+                                                          (event? {:type :NodeChildrenChanged :path "/x"})
+                                                          (event? {:type :NodeDataChanged :path "/x/y"})
+                                                          (event? {:type :NodeDeleted :path "/x/y"})
+                                                          (event? {:type :NodeChildrenChanged :path "/x"})]))))))
+
+(fact "Client handles disconnects"
+      (let [$zclient (create)]
+        (with-open [$t0 (TestingServer. false)]
+          (with-open [$c (open $zclient (.getConnectString $t0) {})]
+            $c => (eventually-streams 1 2500 (just [::z/connecting]))
             (.start $t0)
-            $c => (eventually-streams 1 2500 (just [(just [::z/connected (partial instance? ZooKeeper)])]))
+            $c => (eventually-streams 2 2500 (just [::z/connected ::z/watching]))
             (.stop $t0)
-            $c => (eventually-streams 1 2500 (just [(just [::z/reconnecting (partial instance? ZooKeeper)])]))
+            $c => (eventually-streams 1 2500 (just [::z/reconnecting]))
             (.restart $t0)
-            $c => (eventually-streams 1 2500 (just [(just [::z/connected (partial instance? ZooKeeper)])]))
+            $c => (eventually-streams 1 2500 (just [::z/watching]))
             (.stop $t0)
-            $c => (eventually-streams 1 2500 (just [(just [::z/reconnecting (partial instance? ZooKeeper)])]))
-            (log/debug ">>>>>>>>>> About to start a new server -should trigger expiration of existing sessions <<<<<<")
-            (.start $t1) ; Provoke expiration via our custom approach.
-            $c => (eventually-streams 2 3000 (just [(just [::z/closed (partial instance? ZooKeeper)])
-                                                    (just [::z/connecting (partial instance? ZooKeeper)])]))))))
+            $c => (eventually-streams 1 2500 (just [::z/reconnecting]))
+            (.injectSessionExpiration (.getTestable @(.client-atom $zclient)))
+            $c => (eventually-streams 1 2500 (just [::z/connecting]))))))
 
 (fact "Client survives session migration to alternate cluster server"
       (with-open [$t (TestingCluster. 3)]
         (let [$cstring (.getConnectString $t)
-              $c (async/chan 1)
               $zclient (create)]
-          (async/tap $zclient $c)
-          (with-open [_ (open $zclient $cstring 500)]
-            $c => (eventually-streams 1 2500 (just [(just [::z/connecting (partial instance? ZooKeeper)])]))
+          (with-open [$c (open $zclient $cstring {})]
+            $c => (eventually-streams 1 2500 (just [::z/connecting]))
             (.start $t)
-            $c => (eventually-streams 1 3500 (just [(just [::z/connected (partial instance? ZooKeeper)])]))
+            $c => (eventually-streams 2 3500 (just [::z/connected ::z/watching]))
             (let [instance (.findConnectionInstance $t @(.client-atom $zclient))]
               (assert (.killServer $t instance) "Couldn't kill ZooKeeper server instance")
-              $c => (eventually-streams 2 4500 (just [(just [::z/reconnecting (partial instance? ZooKeeper)])
-                                                      (just [::z/connected (partial instance? ZooKeeper)])]))))
-          $c => (eventually-streams 1 2500 (just [(just [::z/closed (partial instance? ZooKeeper)])])))))
+              $c => (eventually-streams 2 4500 (just [::z/reconnecting ::z/watching])))))))
 
-(fact "Client can be stopped and restarted"
+(future-fact "Client handles transition to read-only"
+             (with-open [$t (TestingCluster. 3)]
+               (let [$cstring (.getConnectString $t)
+                     $zclient (create)]
+                 (.start $t)
+                 (with-open [$c (open $zclient $cstring {})]
+                   $c => (eventually-streams 3 2500 (just [::z/connecting ::z/connected ::z/watching]))
+                   (let [instance (.findConnectionInstance $t @(.client-atom $zclient))]
+                     (assert (.killServer $t instance) "Couldn't kill ZooKeeper server instance"))
+                   $c => (eventually-streams 2 4500 (just [::z/reconnecting ::z/watching]))
+                   (let [instance (.findConnectionInstance $t @(.client-atom $zclient))]
+                     (assert (.killServer $t instance) "Couldn't kill ZooKeeper server instance"))
+                   $c => (eventually-streams 2 4500 (just [::z/reconnecting ::z/watching]))))))
+
+(fact "Client can be opened, closed and reopened"
       (with-open [$t (TestingServer.)]
-        (let [$c (async/chan 1)
-              $zclient (create)]
-          (async/tap $zclient $c)
-          (with-open [_ (open $zclient (.getConnectString $t) 5000)]
-            $c => (eventually-streams 2 3500 (just [(just [::z/connecting (partial instance? ZooKeeper)])
-                                                    (just [::z/connected (partial instance? ZooKeeper)])])))
-          $c => (eventually-streams 1 2500 (just [(just [::z/closed (partial instance? ZooKeeper)])]))
-          (with-open [_ (open $zclient (.getConnectString $t) 5000)]
-            $c => (eventually-streams 2 3500 (just [(just [::z/connecting (partial instance? ZooKeeper)])
-                                                    (just [::z/connected (partial instance? ZooKeeper)])])))
-          $c => (eventually-streams 1 2500 (just [(just [::z/closed (partial instance? ZooKeeper)])])))))
+        (let [$zclient (create)]
+          (while-watching [$c (open $zclient (.getConnectString $t) {})]
+            (connected? $zclient) => truthy)
+          (while-watching [$c (open $zclient (.getConnectString $t) {})]
+            (connected? $zclient) => truthy))))
 
 (fact "Client can be stopped and restarted across disparate connections"
-      (with-open [$t0 (TestingServer. false)
-                  $t1 (TestingServer. false)]
-        (let [$c (async/chan 1)
-              $zclient (create)]
-          (async/tap $zclient $c)
-          (with-open [_ (open $zclient (.getConnectString $t0) 5000)]
-            $c => (eventually-streams 1 2500 (just [(just [::z/connecting (partial instance? ZooKeeper)])]))
-            (.start $t0)
-            $c => (eventually-streams 1 2500 (just [(just [::z/connected (partial instance? ZooKeeper)])]))
-            (.stop $t0)
-            $c => (eventually-streams 1 2500 (just [(just [::z/reconnecting (partial instance? ZooKeeper)])])))
-          $c => (eventually-streams 1 4500 (just [(just [::z/closed (partial instance? ZooKeeper)])]))
-          (with-open [_ (open $zclient (.getConnectString $t1) 5000)]
-            $c => (eventually-streams 1 2500 (just [(just [::z/connecting (partial instance? ZooKeeper)])]))
-            (.start $t1)
-            $c => (eventually-streams 1 2500 (just [(just [::z/connected (partial instance? ZooKeeper)])]))
-            (.stop $t1)
-            $c => (eventually-streams 1 2500 (just [(just [::z/reconnecting (partial instance? ZooKeeper)])])))
-          $c => (eventually-streams 1 4500 (just [(just [::z/closed (partial instance? ZooKeeper)])])))))
+      (with-open [$t0 (TestingServer.)
+                  $t1 (TestingServer.)]
+        (let [$zclient (create)]
+          (while-watching [$c (open $zclient (.getConnectString $t0) {})]
+            (connected? $zclient) => truthy)
+          (while-watching [$c (open $zclient (.getConnectString $t1) {})]
+            (connected? $zclient) => truthy))))
 
 (fact "Client support IFn"
-      (let [$c (create)]
-        (with-awaited-open $c $cstring0 5000
-          ($c #(.getSessionPasswd %)) => bytes?
+      (let [$zclient (create)]
+        (while-watching [$c (open $zclient $cstring0 {})]
+          ($zclient #(.getSessionPasswd %)) => bytes?
           ;; And retries when client is not connected and ready to go:
-          (.injectSessionExpiration (.getTestable @(.client-atom $c)))
-          ($c #(.getSessionPasswd %)) => bytes?)))
+          (.injectSessionExpiration (.getTestable @(.client-atom $zclient)))
+          ($zclient #(.getSessionPasswd %)) => bytes?)))
 
 (fact "Client renders toString nicely"
-      (let [events (async/chan 1)
-            $c (create)]
-        (str $c) => #"ℤℂ: <No Raw Client>"
-        (with-awaited-open $c $cstring0 5000
-          (str $c) => #"ℤℂ: @([0-9a-f]+) 0x[0-9a-f]+ \([A-Z]+\)")))
+      (let [$zclient (create)]
+        (str $zclient) => #"ℤℂ: <No Raw Client>"
+        (while-watching [$c (open $zclient $cstring0 {})]
+          (str $zclient) => #"ℤℂ: @([0-9a-f]+) 0x[0-9a-f]+ \([A-Z]+\)")))
