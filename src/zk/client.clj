@@ -153,7 +153,7 @@
                                                   (async/put! watch-tracker ::failed-to-watch)))))))]
                              (.addWatch z path node-watcher watch-mode cb nil)))
           new-client (fn [] (ZooKeeper. ^String connect-string ^int timeout client-watcher can-be-read-only?))
-          rc0 (async/go-loop []
+          rc0 (async/go-loop [] ; This could be replaced with a transducer
                 (when-let [{:keys [state type path] :as event} (async/<! node-events)]
                   (log/debugf "Received node event %s %s %s [%s]" state type path this)
                   (assert (or path (= :None type)) "There should always be a path for node watch events")
@@ -169,7 +169,7 @@
                    (if-let [e (async/alt! client-events ([e] (:state e))
                                           watch-tracker ([e] e)
                                           command ([c] (if c c ::close!))
-                                          (async/timeout 5000) ::heartbeat
+                                          (async/timeout 60000) ::heartbeat
                                           :priority true)]
                      (do (log/tracef "Received command event %15s [%12s]" (name e) (name state))
                          (let [[state' client] (case [state e] ; TODO: clojure.core.match?
