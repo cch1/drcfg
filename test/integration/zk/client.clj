@@ -6,7 +6,7 @@
             [midje.sweet :refer :all]
             [midje.checking.core :refer [extended-=]])
   (:import [org.apache.curator.test TestingServer TestingCluster]
-           [org.apache.zookeeper ZooKeeper]
+           [org.apache.zookeeper ZooKeeper data.Stat]
            [zk.client ZClient]))
 
 (def bogus-host "127.1.1.1:9999")
@@ -42,26 +42,6 @@
           ::ok) => ::ok
         (connected? $c) => falsey))
 
-;; (fact "Client can perform operations on znodes"
-;;       (let [test-server (TestingServer. true)
-;;             c (async/chan 1)
-;;             $client (create)]
-;;         (async/tap $client c)
-;;         (with-open [_ (open $client (.getConnectString test-server) 5000)]
-;;           c  => (eventually-streams 2 3000 (just [(just [:roomkey.zclient/started (partial instance? ZooKeeper)])
-;;                                                  (just [:roomkey.zclient/connected (partial instance? ZooKeeper)])]))
-;;           (create-znode $client "/myznode" {:data (.getBytes "Hello World") :persistent? true}) => stat?
-;;           (create-znode $client "/myznode/child" {}) => truthy
-;;           (exists $client "/myznode" {}) => (contains {:version 0})
-;;           (exists $client "/notmyznode" {}) => falsey
-;;           (data $client "/myznode" {}) => (just {:data (bytes-of "Hello World") :stat (contains {:version 0})})
-;;           (set-data $client "/myznode" (.getBytes "foo") 0 {}) => (contains {:version 1 :mtime (partial instance? java.time.Instant)})
-;;           (set-data $client "/myznode" (.getBytes "foo") 0 {}) => nil
-;;           (Thread/sleep 20)
-;;           (children $client "/myznode" {}) => (just {:children (one-of string?) :stat map?})
-;;           (delete $client "/myznode/child" 0 {}) => truthy
-;;           (delete $client "/myznode" 1 {}) => truthy)))
-
 (fact "Client expiration is handled gracefully"
       (let [$zclient (create)]
         (while-watching [_ (open $zclient $cstring0 {})]
@@ -76,10 +56,10 @@
           (with-open [_ (open $zclient $cstring {})]
             ($zclient #(.create % "/x" (.getBytes "Hi")
                                 org.apache.zookeeper.ZooDefs$Ids/OPEN_ACL_UNSAFE
-                                org.apache.zookeeper.CreateMode/PERSISTENT)) => stat?
+                                org.apache.zookeeper.CreateMode/PERSISTENT)) => string?
             ($zclient #(.create % "/x/y" (.getBytes "Hello")
                                 org.apache.zookeeper.ZooDefs$Ids/OPEN_ACL_UNSAFE
-                                org.apache.zookeeper.CreateMode/PERSISTENT)) => stat?
+                                org.apache.zookeeper.CreateMode/PERSISTENT)) => string?
             ($zclient #(.setData % "/x/y" (.getBytes "World") 0)) => stat?
             ($zclient #(.delete % "/x/y" 1)) => nil?))))
 
@@ -97,7 +77,7 @@
                                 org.apache.zookeeper.CreateMode/PERSISTENT)) => "/x/y"
             (.injectSessionExpiration (.getTestable @(.client-atom $zclient)))
             ;; Race condition used to exist here where watch would not get set in time. Now we nil the raw client until watch is added
-            ($zclient #(stat-to-map (.setData % "/x/y" (.getBytes "World") 0))) => (stat? {})
+            ($zclient #(.setData % "/x/y" (.getBytes "World") 0)) => (partial instance? Stat)
             ($zclient #(.delete % "/x/y" 1)) => nil
             $zclient => (eventually-streams 7 4000 (just [(event? {:type :NodeCreated :path "/x"})
                                                           (event? {:type :NodeChildrenChanged :path "/"})

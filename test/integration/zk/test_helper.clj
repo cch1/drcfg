@@ -3,8 +3,9 @@
             [clojure.tools.logging :as log]
             [midje.sweet :refer :all]
             [midje.checking.core :refer [extended-=]])
-  (:import [org.apache.curator.test TestingServer TestingCluster]
-           [org.apache.zookeeper ZooKeeper]))
+  (:import [java.time Instant]
+           [org.apache.curator.test TestingServer TestingCluster]
+           [org.apache.zookeeper ZooKeeper data.Stat]))
 
 (defchecker bytes-of [expected]
   (checker [actual] (= (seq actual) (seq (.getBytes expected)))))
@@ -46,3 +47,19 @@
   (every-checker (contains {:type keyword?
                             :path string?})
                  (contains expected)))
+
+(defn stat-to-map
+  ([^Stat stat]
+   ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_timeInZk
+   (when stat
+     {:czxid (.getCzxid stat)
+      :mzxid (.getMzxid stat)
+      :pzxid (.getPzxid stat)
+      :ctime (Instant/ofEpochMilli (.getCtime stat))
+      :mtime (Instant/ofEpochMilli (.getMtime stat))
+      :version (.getVersion stat)
+      :cversion (.getCversion stat)
+      :aversion (.getAversion stat)
+      :ephemeralOwner (.getEphemeralOwner stat)
+      :dataLength (.getDataLength stat)
+      :numChildren (.getNumChildren stat)})))
