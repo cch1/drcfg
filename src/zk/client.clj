@@ -202,8 +202,8 @@
                                                  [::closing :Closed] [::closed client] ; The ideal final state (clean shutdown).
                                                  (throw (Exception. (format "Unexpected event %s while in state %s." e state))))]
                            (log/debugf "Event received: %14s [%12s -> %-14s]" (name e) (name state) (name state'))
-                           (when (not= state state') (async/>! monitor state'))
-                           (if (#{::closed ::failed-to-add-watch ::closed-connecting ::closed-connected ::closed-reconnecting ::expired-closing} state')
+                           (when (not= state state') (async/>! events state'))
+                           (if (#{::closed ::failed-to-watch ::closed-connecting ::closed-connected ::closed-reconnecting ::expired-closing} state')
                              (do (when (#{::closed-connecting ::closed-connected ::closed-reconnecting} state')
                                    (log/warnf "%s did not shut down cleanly: %s" this state'))
                                  (async/close! node-events)
