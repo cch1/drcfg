@@ -107,7 +107,7 @@
   (open [this connect-string options] "Open the connection to `connect-string` and stream client's events to `events`")
   (connected? [this] "Is this client currently connected to the ZooKeeper cluster?"))
 
-(deftype ZClient [client-atom events]
+(deftype ZClient [client-atom]
   Connectable
   (open [this connect-string {:keys [timeout recursive? can-be-read-only? path]
                               :or {timeout 2000 can-be-read-only? true recursive? true path "/"}}]
@@ -116,6 +116,7 @@
           client-events (async/chan 8 (map event-to-map))
           node-events (async/chan 8 (map event-to-map))
           watch-tracker (async/chan 2)
+          events (async/chan (async/sliding-buffer 8))
           client-watcher (reify Watcher
                            (process [_ event] (when-not (async/put! client-events event)
                                                 (log/warnf "Failed to put event %s on closed client events channel" event))))
@@ -149,7 +150,6 @@
                                         :path (some-> (.getParent (Paths/get path (into-array String []))) str)})))
                   (recur)))
           command (async/chan 2)
-          monitor (async/chan (async/sliding-buffer 4))
           result (async/go-loop [state ::init client nil]
                    (if-let [e (async/alt! client-events ([e] (:state e))
                                           watch-tracker ([e] e)
@@ -201,11 +201,15 @@
       (log/debugf "Event processing opened for %s" (str this))
       (reify
         java.lang.AutoCloseable
-        (close [_]
+        (close [this]
           (async/close! command)
-          (log/debugf "Closed with %s." (async/<!! result)))
+          (let [result (async/<!! result)] (log/debugf "Closed with %s." result))
+          (.close! this))
         impl/ReadPort
-        (take! [this handler] (impl/take! monitor handler)))))
+        (take! [this handler] (impl/take! events handler))
+        impl/Channel
+        (closed? [this] (impl/closed? events))
+        (close! [this] (async/close! command) (impl/close! events)))))
   (connected? [this] (when-let [client ^ZooKeeper @client-atom]
                        (when (#{ZooKeeper$States/CONNECTED ZooKeeper$States/CONNECTEDREADONLY} (.getState client))
                          client)))
@@ -235,13 +239,6 @@
         2 (.invoke this (first args) (second args))
         (throw (clojure.lang.ArityException. n (.. this (getClass) (getSimpleName)))))))
 
-  impl/ReadPort
-  (take! [this handler] (impl/take! events handler))
-
-  impl/Channel
-  (closed? [this] (impl/closed? events))
-  (close! [this] (impl/close! events))
-
   java.lang.Object
   (toString [this] (format "ℤℂ: %s"
                            (if-let [client @client-atom]
@@ -252,16 +249,19 @@
                                        (.getState client)))
                              "<No Raw Client>"))))
 
-(defn create ^zk.client.ZClient [] (->ZClient (atom nil) (async/chan (async/sliding-buffer 8))))
+(defn create ^zk.client.ZClient [] (->ZClient (atom nil)))
 
-(defmacro while-watching [[handle open-expression] & body]
-  `(let [~handle ~open-expression]
-     (async/<!! (async/go-loop [] (when-not (= ::watching (async/<! ~handle)) (recur))))
-     (try
-       ~@body
-       (finally
-         (. ~handle close)
-         (async/<!! (async/go-loop []
-                      (when-not (#{::closed ::closed-connecting ::closed-connected ::expired-closing ::closed-unexpectedly}
-                                 (async/<! ~handle))
-                        (recur))))))))
+(defmacro while-watching
+  "Evaluate the body after the watch has started, binding `nevents` to a channel that streams observed node events"
+  [[nevents open-expression] & body]
+  `(let [chandle# ~open-expression]
+     (let [[~nevents cevents#] (async/split :path chandle# (async/sliding-buffer 8) (async/sliding-buffer 1))]
+       (async/<!! (async/go-loop [] (when-not (= ::watching (async/<! cevents#)) (recur))))
+       (try
+         ~@body
+         (finally
+           (. chandle# close)
+           (async/<!! (async/go-loop []
+                        (when-not (#{::closed ::closed-connecting ::closed-connected ::expired-closing ::closed-unexpectedly}
+                                   (async/<! cevents#))
+                          (recur)))))))))

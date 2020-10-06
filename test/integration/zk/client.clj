@@ -23,7 +23,8 @@
           (connected? $c) => truthy
           (.close handle) => nil
           handle => (eventually-streams 2 1000 (just [::z/closing ::z/closed]))
-          (connected? $c) => falsey)))
+          (connected? $c) => falsey
+          (async/<!! handle) => nil?)))
 
 (fact "with-open works"
       (let [$c (create)]
@@ -68,7 +69,7 @@
 (fact "Client can watch nodes persistently"
       (with-open [$t0 (TestingServer. true)]
         (let [$zclient (create)]
-          (while-watching [handle (open $zclient (.getConnectString $t0) {})]
+          (while-watching [chandle (open $zclient (.getConnectString $t0) {})]
             ($zclient #(.create % "/x" (.getBytes "Hi")
                                 org.apache.zookeeper.ZooDefs$Ids/OPEN_ACL_UNSAFE
                                 org.apache.zookeeper.CreateMode/PERSISTENT)) => "/x"
@@ -79,13 +80,13 @@
             ;; Race condition used to exist here where watch would not get set in time. Now we nil the raw client until watch is added
             ($zclient #(.setData % "/x/y" (.getBytes "World") 0)) => (partial instance? Stat)
             ($zclient #(.delete % "/x/y" 1)) => nil
-            $zclient => (eventually-streams 7 4000 (just [(event? {:type :NodeCreated :path "/x"})
-                                                          (event? {:type :NodeChildrenChanged :path "/"})
-                                                          (event? {:type :NodeCreated :path "/x/y"})
-                                                          (event? {:type :NodeChildrenChanged :path "/x"})
-                                                          (event? {:type :NodeDataChanged :path "/x/y"})
-                                                          (event? {:type :NodeDeleted :path "/x/y"})
-                                                          (event? {:type :NodeChildrenChanged :path "/x"})]))))))
+            chandle => (eventually-streams 7 4000 (just [(event? {:type :NodeCreated :path "/x"})
+                                                         (event? {:type :NodeChildrenChanged :path "/"})
+                                                         (event? {:type :NodeCreated :path "/x/y"})
+                                                         (event? {:type :NodeChildrenChanged :path "/x"})
+                                                         (event? {:type :NodeDataChanged :path "/x/y"})
+                                                         (event? {:type :NodeDeleted :path "/x/y"})
+                                                         (event? {:type :NodeChildrenChanged :path "/x"})]))))))
 
 (fact "Client handles disconnects"
       (let [$zclient (create)]
