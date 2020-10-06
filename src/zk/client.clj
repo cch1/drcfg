@@ -91,14 +91,14 @@
 (defn- synthesize-child-events
   "A transducer to Inject :NodeChildrenChanged events into the sequence-ish."
   [rf]
-  (fn synthesize-child-events'
+  (fn synthesize-child-events
     ([] (rf))
     ([result] (rf result))
     ([result {:keys [type path] :as input}]
-     (let [result (if (#{:NodeCreated :NodeDeleted} type)
-                    (rf result {:type :NodeChildrenChanged :path (some-> (.getParent (Paths/get path (into-array String []))) str)})
-                    result)]
-       (rf result input)))))
+     (let [result (rf result input)]
+       (if (#{:NodeCreated :NodeDeleted} type)
+         (rf result {:type :NodeChildrenChanged :path (some-> (.getParent (Paths/get path (into-array String []))) str)})
+         result)))))
 
 (defn- prefix-kw [x prefix] (keyword (str (namespace x)) (str prefix (name x))))
 
@@ -114,7 +114,7 @@
     (assert (nil? @client-atom) "Must close current connection before opening a new connection!")
     (let [watch-mode (watch-modes {:persistent? true :recursive? (boolean recursive?)})
           client-events (async/chan 8 (map event-to-map))
-          node-events (async/chan 8 (map event-to-map))
+          node-events (async/chan 8 (comp (map event-to-map) (map #(dissoc % :state)) (filter :path) synthesize-child-events))
           watch-tracker (async/chan 2)
           events (async/chan (async/sliding-buffer 8))
           client-watcher (reify Watcher
@@ -139,16 +139,6 @@
                                                   (async/put! watch-tracker ::failed-to-watch)))))))]
                              (.addWatch z path node-watcher watch-mode cb nil)))
           new-client (fn [] (ZooKeeper. ^String connect-string ^int timeout client-watcher can-be-read-only?))
-          rc0 (async/go-loop [] ; This could be replaced with a transducer
-                (when-let [{:keys [state type path] :as event} (async/<! node-events)]
-                  (log/debugf "Received node event %s %s %s [%s]" state type path this)
-                  (assert (or path (= :None type)) "There should always be a path for node watch events")
-                  (when path
-                    (async/>! events (dissoc event :state))
-                    (when (#{:NodeCreated :NodeDeleted} type)
-                      (async/>! events {:type :NodeChildrenChanged
-                                        :path (some-> (.getParent (Paths/get path (into-array String []))) str)})))
-                  (recur)))
           command (async/chan 2)
           result (async/go-loop [state ::init client nil]
                    (if-let [e (async/alt! client-events ([e] (:state e))
@@ -193,10 +183,10 @@
                                    (log/warnf "%s did not shut down cleanly: %s" this state'))
                                  (async/close! node-events)
                                  (async/close! client-events)
-                                 (async/<! rc0)
                                  state')
                              (recur state' client))))
                      ::closed-unexpectedly))]
+      (async/pipe node-events events)
       (async/>!! command ::open!)
       (log/debugf "Event processing opened for %s" (str this))
       (reify
