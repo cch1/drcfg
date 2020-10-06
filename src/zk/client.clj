@@ -210,7 +210,7 @@
     (loop [[backoff & backoffs] (take 12 (iterate #(int (* 2 %)) 2))]
       (if-let [[result] (try (if-let [client ^ZooKeeper @client-atom]
                                [(f client)]
-                               (throw (ex-info (format "Client %s unavailable while processing ZooKeeper request." this)
+                               (throw (ex-info (format "No raw client available to process ZooKeeper request." this)
                                                {::anomalies/category ::anomalies/unavailable})))
                              (catch clojure.lang.ExceptionInfo ex
                                (when-not backoff [(handler ex)]))
