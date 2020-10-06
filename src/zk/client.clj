@@ -59,7 +59,7 @@
                           KeeperException$Code/UNKNOWNSESSION ::anomalies/incorrect}
       retryables #{::anomalies/busy ::anomalies/unavailable ::anomalies/interrupted}]
   ;; https://github.com/cognitect-labs/anomalies
-  (defn- translate-return-code
+  (defn translate-return-code
     "Translate callback return codes to our semantics"
     [rc]
     (let [code (KeeperException$Code/get rc)
