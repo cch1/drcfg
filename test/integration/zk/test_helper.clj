@@ -23,6 +23,31 @@
                        (conj out (if (= c port) ::channel-closed ::timeout))
                        (recur (conj out v)))))))))
 
+(defchecker refers-to [expected]
+  (checker [actual] (extended-= (deref actual) expected)))
+
+(defchecker eventually-refers-to [timeout expected]
+  (checker [actual]
+           (loop [t timeout]
+             (when (pos? t)
+               (if-let [result (extended-= (deref actual) expected)]
+                 result
+                 (do (Thread/sleep 200)
+                     (recur (- t 200))))))))
+
+(defchecker eventually-vrefers-to [timeout expected]
+  (checker [actual]
+           (loop [t timeout]
+             (when (pos? t)
+               (if-let [result (extended-= (.vDeref actual) expected)]
+                 result
+                 (do (Thread/sleep 200)
+                     (recur (- t 200))))))))
+
+(defchecker having-metadata [expected]
+  (every-checker (chatty-checker [actual] (extended-= actual expected))
+                 (chatty-checker [actual] (extended-= (meta actual) (meta expected)))))
+
 (defchecker eventually-streams [n timeout expected]
   ;; The key to chatty checkers is to have the useful intermediate results be the evaluation of arguments to top-level expressions!
   (chatty-checker [actual] (extended-= (streams n timeout actual) expected)))

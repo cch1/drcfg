@@ -114,9 +114,8 @@
     (assert (nil? @client-atom) "Must close current connection before opening a new connection!")
     (let [watch-mode (watch-modes {:persistent? true :recursive? (boolean recursive?)})
           client-events (async/chan 8 (map event-to-map))
-          node-events (async/chan 8 (comp (map event-to-map) (map #(dissoc % :state)) (filter :path) synthesize-child-events))
+          node-events (async/chan (async/sliding-buffer 8) (comp (map event-to-map) (map #(dissoc % :state)) (filter :path) synthesize-child-events))
           watch-tracker (async/chan 2)
-          events (async/chan (async/sliding-buffer 8))
           client-watcher (reify Watcher
                            (process [_ event] (when-not (async/put! client-events event)
                                                 (log/warnf "Failed to put event %s on closed client events channel" event))))
@@ -140,6 +139,7 @@
                              (.addWatch z path node-watcher watch-mode cb nil)))
           new-client (fn [] (ZooKeeper. ^String connect-string ^int timeout client-watcher can-be-read-only?))
           command (async/chan 2)
+          connection (atom (promise))
           result (async/go-loop [state ::init client nil]
                    (if-let [e (async/alt! client-events ([e] (:state e))
                                           watch-tracker ([e] e)
@@ -155,18 +155,21 @@
                                                  ;; ([::connected :SyncConnected] [::connected :ConnectedReadOnly]) ::connected ; to/from read-only
                                                  ;; ([::connected :Disconnected] [::watching :Disconnected]) ::reconnecting
                                                  ([::connected :Expired] [::watching :Expired])
-                                                 , (do (reset! client-atom nil) [::connecting (new-client)]) ; testing only?
+                                                 , (do (reset! client-atom nil) (reset! connection (promise))[::connecting (new-client)]) ; testing only?
                                                  [::connected ::watch-added]
-                                                 , (do (reset! client-atom client) [::watching client]) ; the ideal steady-state
+                                                 , (do (reset! client-atom client) (deliver @connection client) [::watching client]) ; the ideal steady-state
                                                  [::watching ::heartbeat] [::watching client] ; the ideal steady-state Part Deux
                                                  ([::connecting ::heartbeat] [::connected ::heartbeat] [::reconnecting ::heartbeat])
                                                  , [state client]
                                                  [::watching :Disconnected] [::reconnecting client]
                                                  ([::reconnecting :SyncConnected] [::reconnecting :ConnectedReadOnly])
                                                  , [::watching client] ; watches survive
-                                                 [::reconnecting :Expired] (do (reset! client-atom nil) [::connecting (new-client)])
+                                                 [::reconnecting :Expired] (do (reset! client-atom nil)
+                                                                               (reset! connection (promise))
+                                                                               [::connecting (new-client)])
                                                  ([::connecting ::close!] [::connected ::close!] [::watching ::close!] [::reconnecting ::close!])
                                                  , (do (reset! client-atom nil)
+                                                       (reset! connection (promise))
                                                        (if (async/<! (async/thread (.close ^ZooKeeper client timeout)))
                                                          [::closing client]
                                                          [(prefix-kw state "closed-") client]))
@@ -177,16 +180,15 @@
                                                  [::closing :Closed] [::closed client] ; The ideal final state (clean shutdown).
                                                  (throw (Exception. (format "Unexpected event %s while in state %s." e state))))]
                            (log/debugf "Event received: %14s [%12s -> %-14s]" (name e) (name state) (name state'))
-                           (when (not= state state') (async/>! events state'))
                            (if (#{::closed ::failed-to-watch ::closed-connecting ::closed-connected ::closed-reconnecting ::expired-closing} state')
                              (do (when (#{::closed-connecting ::closed-connected ::closed-reconnecting} state')
                                    (log/warnf "%s did not shut down cleanly: %s" this state'))
                                  (async/close! node-events)
                                  (async/close! client-events)
+                                 (deliver @connection nil)
                                  state')
                              (recur state' client))))
                      ::closed-unexpectedly))]
-      (async/pipe node-events events)
       (async/>!! command ::open!)
       (log/debugf "Event processing opened for %s" (str this))
       (reify
@@ -195,11 +197,17 @@
           (async/close! command)
           (let [result (async/<!! result)] (log/debugf "Closed with %s." result))
           (.close! this))
+        clojure.lang.IDeref
+        (deref [this] (deref @connection))
+        clojure.lang.IBlockingDeref
+        (deref [this timeout timeout-value] (deref @connection timeout timeout-value))
+        clojure.lang.IPending
+        (isRealized [this] (realized? @connection))
         impl/ReadPort
-        (take! [this handler] (impl/take! events handler))
+        (take! [this handler] (impl/take! node-events handler))
         impl/Channel
-        (closed? [this] (impl/closed? events))
-        (close! [this] (async/close! command) (impl/close! events)))))
+        (closed? [this] (impl/closed? node-events))
+        (close! [this] (async/close! command) (impl/close! node-events)))))
   (connected? [this] (when-let [client ^ZooKeeper @client-atom] (.isConnected (.getState client))))
 
   clojure.lang.IFn
@@ -241,15 +249,11 @@
 
 (defmacro while-watching
   "Evaluate the body after the watch has started, binding `nevents` to a channel that streams observed node events"
-  [[nevents open-expression] & body]
-  `(let [chandle# ~open-expression]
-     (let [[~nevents cevents#] (async/split :path chandle# (async/sliding-buffer 8) (async/sliding-buffer 1))]
-       (async/<!! (async/go-loop [] (when-not (= ::watching (async/<! cevents#)) (recur))))
-       (try
-         ~@body
-         (finally
-           (. chandle# close)
-           (async/<!! (async/go-loop []
-                        (when-not (#{::closed ::closed-connecting ::closed-connected ::expired-closing ::closed-unexpectedly}
-                                   (async/<! cevents#))
-                          (recur)))))))))
+  [[chandle open-expression] & body]
+  `(let [~chandle ~open-expression]
+     (assert (deref ~chandle) "No connection established") ; TODO: support a timeout
+     (try
+       ~@body
+       (finally
+         (. ~chandle close)
+         (assert (not (deref ~chandle)) "Unrecognized close state"))))) ; TODO: apply the same timeout here?
