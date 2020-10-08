@@ -200,9 +200,7 @@
         impl/Channel
         (closed? [this] (impl/closed? events))
         (close! [this] (async/close! command) (impl/close! events)))))
-  (connected? [this] (when-let [client ^ZooKeeper @client-atom]
-                       (when (#{ZooKeeper$States/CONNECTED ZooKeeper$States/CONNECTEDREADONLY} (.getState client))
-                         client)))
+  (connected? [this] (when-let [client ^ZooKeeper @client-atom] (.isConnected (.getState client))))
 
   clojure.lang.IFn
   (invoke [this f] (.invoke this f (fn [e] (log/warnf e "Failed.") (throw e))))
