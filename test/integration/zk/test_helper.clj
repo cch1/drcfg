@@ -48,6 +48,11 @@
   (every-checker (chatty-checker [actual] (extended-= actual expected))
                  (chatty-checker [actual] (extended-= (meta actual) (meta expected)))))
 
+(defchecker as-ex-info
+  [expected]
+  (chatty-checker [actual]
+                  (extended-= [(ex-message actual) (ex-data actual) (ex-cause actual)] expected)))
+
 (defchecker eventually-streams [n timeout expected]
   ;; The key to chatty checkers is to have the useful intermediate results be the evaluation of arguments to top-level expressions!
   (chatty-checker [actual] (extended-= (streams n timeout actual) expected)))

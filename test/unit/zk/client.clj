@@ -1,12 +1,8 @@
 (ns unit.zk.client
   (:require [zk.client :refer :all]
             [midje.sweet :refer :all]
+            [integration.zk.test-helper :refer [as-ex-info]]
             [midje.checking.core :refer [extended-=]]))
-
-(defchecker as-ex-info
-  [expected]
-  (chatty-checker [actual]
-                  (extended-= [(ex-message actual) (ex-data actual) (ex-cause actual)] expected)))
 
 (fact "Can create a ZClient"
       (create) => (partial instance? zk.client.ZClient))
