@@ -246,7 +246,7 @@
 (defn create ^zk.client.ZClient [] (->ZClient (atom nil)))
 
 (defmacro while-watching
-  "Evaluate the body after the watch has started, binding `nevents` to a channel that streams observed node events"
+  "Evaluate the body after the watch has started, binding `chandle` to a channel that streams observed node events"
   [[chandle open-expression] & body]
   `(let [~chandle ~open-expression]
      (assert (deref ~chandle) "No connection established") ; TODO: support a timeout
