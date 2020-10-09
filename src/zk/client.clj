@@ -65,28 +65,26 @@
     (let [code (KeeperException$Code/get rc)
           category (anomaly-categories code)
           retry? (boolean (retryables category))]
-      [retry? category code]))
+      [((comp keyword str) code) retry? category])))
 
-  (defn- translate-exception
-    "Translate keeper exceptions to our semantics"
-    [e]
-    (let [msg (.getMessage e)
-          [retry? category] (translate-return-code (.getCode e))
-          ex (ex-info msg {::anomalies/category category} e)]
-      [retry? ex])))
+(defn kex-info
+  "Create an ExceptionInfo from the ZooKeeper return code `rc`, message `msg`, supplemental ex-info map `m` and optional `cause`"
+  [rc msg m & cause]
+  (let [[kcode retry? category] (translate-return-code rc)
+        m (merge {::anomalies/category category ::kex-code kcode} m)]
+    [(if cause (ex-info msg m cause) (ex-info msg m)) retry?]))
 
-(def return-codes
-  "A map from return code to transparent keyword"
-  (into {} (map (fn [ecode] [(.intValue ecode) ((comp keyword str) ecode)])) (KeeperException$Code/values)))
+(defn translate-exception
+  "Translate keeper exceptions to our semantics"
+  [e]
+  (kex-info (.getCode e) (.getMessage e) {} e))
 
 (def watch-modes {{:persistent? true :recursive? false} AddWatchMode/PERSISTENT
                   {:persistent? true :recursive? true} AddWatchMode/PERSISTENT_RECURSIVE})
 
 (defn- event-to-map
   [^WatchedEvent event]
-  {:type (keyword (.name (.getType event)))
-   :state (keyword (.name (.getState event)))
-   :path (.getPath event)})
+  {:type (keyword (.name (.getType event))) :state (keyword (.name (.getState event))) :path (.getPath event)})
 
 (defn- synthesize-child-events
   "A transducer to Inject :NodeChildrenChanged events into the sequence-ish."
@@ -125,16 +123,16 @@
           add-node-watch (fn add-node-watch [z [backoff & backoffs]]
                            (let [cb (reify AsyncCallback$VoidCallback
                                       (processResult [this rc path ctx]
-                                        (if (= :OK (return-codes rc))
+                                        (if (zero? rc)
                                           (async/put! watch-tracker ::watch-added)
-                                          (let [[retry? category code] (translate-return-code rc)
+                                          (let [[kcode retry? category] (translate-return-code rc)
                                                 state (.getState z)]
                                             (if (and backoff retry? (not (#{ZooKeeper$States/CLOSED} state)))
                                               (do (log/warnf "Unable to add watch [%s/%s : %s], backing off %d"
-                                                             code state (name category)  backoff)
+                                                             kcode state (name category)  backoff)
                                                   (Thread/sleep backoff)
                                                   (add-node-watch z backoffs)) ; being careful with the stack.
-                                              (do (log/warnf "Failed to add watch [%s : %s]." code (name category))
+                                              (do (log/warnf "Failed to add watch [%s : %s]." kcode (name category))
                                                   (async/put! watch-tracker ::failed-to-watch)))))))]
                              (.addWatch z path node-watcher watch-mode cb nil)))
           new-client (fn [] (ZooKeeper. ^String connect-string ^int timeout client-watcher can-be-read-only?))
@@ -221,7 +219,7 @@
                              (catch clojure.lang.ExceptionInfo ex
                                (when-not backoff [(handler ex)]))
                              (catch KeeperException e
-                               (let [[retry? ex] (translate-exception e)]
+                               (let [[ex retry?] (translate-exception e)]
                                  (when-not (and retry? backoff) [(handler ex)]))))]
         result
         (do
