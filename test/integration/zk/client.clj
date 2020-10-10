@@ -13,6 +13,21 @@
 (def test-server (TestingServer. true))
 (def $cstring0 (.getConnectString test-server))
 
+(defn expire!
+  "Expire the client's session"
+  [client]
+  (if-let [z (deref @(.-zap client) 0 nil)]
+    ;; Provoke expiration via "official" approach: https://zookeeper.apache.org/doc/r3.5.5/api/org/apache/zookeeper/Testable.html
+    (.injectSessionExpiration (.getTestable z))
+    (throw (Exception. "Unable to expire session -missing ZooKeeper client"))))
+
+(defn kill-server!
+  "Kill the client's currently connected server of the cluster"
+  [client cluster]
+  (if-let [z (deref @(.-zap client) 0 nil)]
+    (let [instance (.findConnectionInstance cluster z)]
+      (assert (.killServer cluster instance) "Couldn't kill ZooKeeper server instance"))))
+
 (fact "Can create and open a client and close it with proper events arriving and connected state available"
       (let [events (async/chan 10)
             $c (create)]
@@ -24,6 +39,20 @@
           (.close handle) => nil
           handle => (refers-to nil?)
           (connected? $c) => falsey)))
+
+(fact "Client can't be opened twice"
+      (with-open [$t (TestingServer.)]
+        (let [$zclient (create)]
+          (open $zclient (.getConnectString $t) {}) => (partial instance? java.lang.AutoCloseable)
+          (open $zclient (.getConnectString $t) {}) => (throws java.lang.AssertionError))))
+
+(fact "Client can be opened, closed and reopened"
+      (with-open [$t (TestingServer.)]
+        (let [$zclient (create)]
+          (while-watching [$c (open $zclient (.getConnectString $t) {})]
+            (connected? $zclient) => truthy)
+          (while-watching [$c (open $zclient (.getConnectString $t) {})]
+            (connected? $zclient) => truthy))))
 
 (fact "with-open works"
       (let [$c (create)]
@@ -44,8 +73,7 @@
 (fact "Client expiration is handled gracefully"
       (let [$zclient (create)]
         (while-watching [_ (open $zclient $cstring0 {})]
-          ;; Provoke expiration via "official" approach: https://zookeeper.apache.org/doc/r3.5.5/api/org/apache/zookeeper/Testable.html
-          (.injectSessionExpiration (.getTestable @(.client-atom $zclient)))
+          (expire! $zclient)
           ::ok) => ::ok))
 
 (fact "Client will retry prior to the connection and watch being established"
@@ -74,7 +102,7 @@
             ($zclient #(.create % "/x/y" (.getBytes "Hello")
                                 org.apache.zookeeper.ZooDefs$Ids/OPEN_ACL_UNSAFE
                                 org.apache.zookeeper.CreateMode/PERSISTENT)) => "/x/y"
-            (.injectSessionExpiration (.getTestable @(.client-atom $zclient)))
+            (expire! $zclient)
             ;; Race condition used to exist here where watch would not get set in time. Now we nil the raw client until watch is added
             ($zclient #(.setData % "/x/y" (.getBytes "World") 0)) => (partial instance? Stat)
             ($zclient #(.delete % "/x/y" 1)) => nil
@@ -99,7 +127,7 @@
             chandle => (refers-to (partial instance? ZooKeeper))
             (.stop $t0)
             chandle => (refers-to (partial instance? ZooKeeper))
-            (.injectSessionExpiration (.getTestable @(.client-atom $zclient)))
+            (expire! $zclient)
             (deref chandle 250 ::expired-and-no-server-to-connect-to) => ::expired-and-no-server-to-connect-to
             (.restart $t0)
             chandle => (refers-to (partial instance? ZooKeeper))))))
@@ -112,9 +140,8 @@
             (deref chandle 250 ::not-yet-connected) => ::not-yet-connected
             (.start $t)
             chandle => (refers-to (partial instance? ZooKeeper))
-            (let [instance (.findConnectionInstance $t @(.client-atom $zclient))]
-              (assert (.killServer $t instance) "Couldn't kill ZooKeeper server instance")
-              chandle => (refers-to (partial instance? ZooKeeper)))))))
+            (kill-server! $zclient $t)
+            chandle => (refers-to (partial instance? ZooKeeper))))))
 
 (future-fact "Client handles transition to read-only"
              (with-open [$t (TestingCluster. 3)]
@@ -129,14 +156,6 @@
                    (let [instance (.findConnectionInstance $t @(.client-atom $zclient))]
                      (assert (.killServer $t instance) "Couldn't kill ZooKeeper server instance"))
                    chandle => (refers-to (partial instance? ZooKeeper))))))
-
-(fact "Client can be opened, closed and reopened"
-      (with-open [$t (TestingServer.)]
-        (let [$zclient (create)]
-          (while-watching [$c (open $zclient (.getConnectString $t) {})]
-            (connected? $zclient) => truthy)
-          (while-watching [$c (open $zclient (.getConnectString $t) {})]
-            (connected? $zclient) => truthy))))
 
 (fact "Client can be stopped and restarted across disparate connections"
       (with-open [$t0 (TestingServer.)
@@ -154,7 +173,7 @@
         (while-watching [_ (open $zclient $cstring0 {})]
           ($zclient #(.getSessionPasswd %)) => bytes?
           ;; And retries when client is not connected and ready to go:
-          (.injectSessionExpiration (.getTestable @(.client-atom $zclient)))
+          (expire! $zclient)
           ($zclient #(.getSessionPasswd %)) => bytes?)))
 
 (fact "Client renders toString nicely"

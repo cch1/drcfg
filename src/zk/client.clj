@@ -1,8 +1,7 @@
 (ns zk.client
   "A resilient and respawning Zookeeper client"
   (:import [org.apache.zookeeper ZooKeeper Watcher WatchedEvent data.Stat
-            AsyncCallback$Create2Callback AsyncCallback$StatCallback AsyncCallback$VoidCallback
-            AsyncCallback$DataCallback AsyncCallback$Children2Callback
+            AsyncCallback$VoidCallback
             CreateMode ZooKeeper$States
             Watcher$Event$EventType Watcher$Event$KeeperState
             ZooDefs$Ids
@@ -105,11 +104,12 @@
   (open [this connect-string options] "Open the connection to `connect-string` and stream client's events to `events`")
   (connected? [this] "Is this client currently connected to the ZooKeeper cluster?"))
 
-(deftype ZClient [client-atom]
+(deftype ZClient [zap]
   Connectable
   (open [this connect-string {:keys [timeout recursive? can-be-read-only? path]
                               :or {timeout 2000 can-be-read-only? true recursive? true path "/"}}]
-    (assert (nil? @client-atom) "Must close current connection before opening a new connection!")
+    (assert (not (deref @zap 0 true)) "Must close current connection before opening a new connection!") ; There is a bit of a race condition here...
+    (reset! zap (promise))
     (let [watch-mode (watch-modes {:persistent? true :recursive? (boolean recursive?)})
           client-events (async/chan 8 (map event-to-map))
           node-events (async/chan (async/sliding-buffer 8) (comp (map event-to-map) (map #(dissoc % :state)) (filter :path) synthesize-child-events))
@@ -137,7 +137,6 @@
                              (.addWatch z path node-watcher watch-mode cb nil)))
           new-client (fn [] (ZooKeeper. ^String connect-string ^int timeout client-watcher can-be-read-only?))
           command (async/chan 2)
-          connection (atom (promise))
           result (async/go-loop [state ::init client nil]
                    (if-let [e (async/alt! client-events ([e] (:state e))
                                           watch-tracker ([e] e)
@@ -153,21 +152,19 @@
                                                  ;; ([::connected :SyncConnected] [::connected :ConnectedReadOnly]) ::connected ; to/from read-only
                                                  ;; ([::connected :Disconnected] [::watching :Disconnected]) ::reconnecting
                                                  ([::connected :Expired] [::watching :Expired])
-                                                 , (do (reset! client-atom nil) (reset! connection (promise))[::connecting (new-client)]) ; testing only?
+                                                 , (do (reset! zap (promise)) [::connecting (new-client)]) ; testing only?
                                                  [::connected ::watch-added]
-                                                 , (do (reset! client-atom client) (deliver @connection client) [::watching client]) ; the ideal steady-state
+                                                 , (do (deliver @zap client) [::watching client]) ; the ideal steady-state
                                                  [::watching ::heartbeat] [::watching client] ; the ideal steady-state Part Deux
                                                  ([::connecting ::heartbeat] [::connected ::heartbeat] [::reconnecting ::heartbeat])
                                                  , [state client]
                                                  [::watching :Disconnected] [::reconnecting client]
                                                  ([::reconnecting :SyncConnected] [::reconnecting :ConnectedReadOnly])
                                                  , [::watching client] ; watches survive
-                                                 [::reconnecting :Expired] (do (reset! client-atom nil)
-                                                                               (reset! connection (promise))
+                                                 [::reconnecting :Expired] (do (reset! zap (promise))
                                                                                [::connecting (new-client)])
                                                  ([::connecting ::close!] [::connected ::close!] [::watching ::close!] [::reconnecting ::close!])
-                                                 , (do (reset! client-atom nil)
-                                                       (reset! connection (promise))
+                                                 , (do (reset! zap (promise))
                                                        (if (async/<! (async/thread (.close ^ZooKeeper client timeout)))
                                                          [::closing client]
                                                          [(prefix-kw state "closed-") client]))
@@ -183,7 +180,7 @@
                                    (log/warnf "%s did not shut down cleanly: %s" this state'))
                                  (async/close! node-events)
                                  (async/close! client-events)
-                                 (deliver @connection nil)
+                                 (deliver @zap nil)
                                  state')
                              (recur state' client))))
                      ::closed-unexpectedly))]
@@ -196,23 +193,23 @@
           (let [result (async/<!! result)] (log/debugf "Closed with %s." result))
           (.close! this))
         clojure.lang.IDeref
-        (deref [this] (deref @connection))
+        (deref [this] (deref @zap))
         clojure.lang.IBlockingDeref
-        (deref [this timeout timeout-value] (deref @connection timeout timeout-value))
+        (deref [this timeout timeout-value] (deref @zap timeout timeout-value))
         clojure.lang.IPending
-        (isRealized [this] (realized? @connection))
+        (isRealized [this] (realized? @zap))
         impl/ReadPort
         (take! [this handler] (impl/take! node-events handler))
         impl/Channel
         (closed? [this] (impl/closed? node-events))
         (close! [this] (async/close! command) (impl/close! node-events)))))
-  (connected? [this] (when-let [client ^ZooKeeper @client-atom] (.isConnected (.getState client))))
+  (connected? [this] (when-let [client ^ZooKeeper (deref @zap 0 nil)] (.isConnected (.getState client))))
 
   clojure.lang.IFn
   (invoke [this f] (.invoke this f (fn [e] (log/warnf e "Failed.") (throw e))))
   (invoke [this f handler] ; resiliently invoke `f` with a raw client, calling the handler on unrecoverable exceptions
     (loop [[backoff & backoffs] (take 12 (iterate #(int (* 2 %)) 2))]
-      (if-let [[result] (try (if-let [client ^ZooKeeper @client-atom]
+      (if-let [[result] (try (if-let [client ^ZooKeeper (deref @zap 0 nil)]
                                [(f client)]
                                (throw (ex-info (format "No raw client available to process ZooKeeper request." this)
                                                {::anomalies/category ::anomalies/unavailable})))
@@ -235,7 +232,7 @@
 
   java.lang.Object
   (toString [this] (format "ℤℂ: %s"
-                           (if-let [client @client-atom]
+                           (if-let [client (deref @zap 0 nil)]
                              (let [server (last (re-find #"remoteserver:(\S+)" (.toString ^ZooKeeper client)))]
                                (format "@%04x 0x%08x (%s)"
                                        (System/identityHashCode client)
@@ -243,7 +240,7 @@
                                        (.getState client)))
                              "<No Raw Client>"))))
 
-(defn create ^zk.client.ZClient [] (->ZClient (atom nil)))
+(defn create ^zk.client.ZClient [] (let [zap (atom (promise))] (deliver @zap nil) (->ZClient zap)))
 
 (defmacro while-watching
   "Evaluate the body after the watch has started, binding `chandle` to a channel that streams observed node events"
