@@ -86,7 +86,7 @@
   {:type (keyword (.name (.getType event))) :state (keyword (.name (.getState event))) :path (.getPath event)})
 
 (defn- synthesize-child-events
-  "A transducer to Inject :NodeChildrenChanged events into the sequence-ish."
+  "A transducer to inject :NodeChildrenChanged events into the transducible."
   [rf]
   (fn synthesize-child-events
     ([] (rf))
@@ -120,49 +120,42 @@
           node-watcher (reify Watcher
                          (process [_ event] (when-not (async/put! node-events event)
                                               (log/warnf "Failed to put event %s on closed node events channel" event))))
-          add-node-watch (fn add-node-watch [z [backoff & backoffs]]
-                           (let [cb (reify AsyncCallback$VoidCallback
-                                      (processResult [this rc path ctx]
-                                        (if (zero? rc)
-                                          (async/put! watch-tracker ::watch-added)
-                                          (let [[kcode retry? category] (translate-return-code rc)
-                                                state (.getState z)]
-                                            (if (and backoff retry? (not (#{ZooKeeper$States/CLOSED} state)))
-                                              (do (log/warnf "Unable to add watch [%s/%s : %s], backing off %d"
-                                                             kcode state (name category)  backoff)
-                                                  (Thread/sleep backoff)
-                                                  (add-node-watch z backoffs)) ; being careful with the stack.
-                                              (do (log/warnf "Failed to add watch [%s : %s]." kcode (name category))
-                                                  (async/put! watch-tracker ::failed-to-watch)))))))]
-                             (.addWatch z path node-watcher watch-mode cb nil)))
+          watch-node (fn watch-node [z [backoff & backoffs]]
+                       (let [cb (reify AsyncCallback$VoidCallback
+                                  (processResult [this rc path ctx]
+                                    (if (zero? rc)
+                                      (async/put! watch-tracker ::watch-added)
+                                      (let [[kcode retry? category] (translate-return-code rc)
+                                            state (.getState z)]
+                                        (if (and backoff retry? (not (#{ZooKeeper$States/CLOSED} state)))
+                                          (do (log/infof "Unable to add watch [%s/%s: %s], backing off %d" kcode state (name category) backoff)
+                                              (Thread/sleep backoff)
+                                              (watch-node z backoffs)) ; being careful with the stack.
+                                          (do (log/warnf "Failed to add watch [%s : %s]." kcode (name category))
+                                              (async/put! watch-tracker ::failed-to-watch)))))))]
+                         (.addWatch z path node-watcher watch-mode cb nil)))
           new-client (fn [] (ZooKeeper. ^String connect-string ^int timeout client-watcher can-be-read-only?))
           command (async/chan 2)
           result (async/go-loop [state ::init client nil]
                    (if-let [e (async/alt! client-events ([e] (:state e))
                                           watch-tracker ([e] e)
                                           command ([c] (if c c ::close!))
-                                          (async/timeout 60000) ::heartbeat
                                           :priority true)]
                      (do (log/tracef "Received command event %15s [%12s]" (name e) (name state))
                          (let [[state' client] (case [state e] ; TODO: clojure.core.match?
                                                  [::init ::open!] [::connecting (new-client)]
                                                  ([::connecting :SyncConnected] [::connecting :ConnectedReadOnly])
-                                                 , (do (add-node-watch client (take 16 (iterate #(int (* 2 %)) 1))) [::connected client])
+                                                 , (do (watch-node client (take 16 (iterate #(int (* 2 %)) 1))) [::connected client])
                                                  [::connecting ::watch-added] [::connecting client] ; rare: :Expire immediately after connected->add-watch
-                                                 ;; ([::connected :SyncConnected] [::connected :ConnectedReadOnly]) ::connected ; to/from read-only
-                                                 ;; ([::connected :Disconnected] [::watching :Disconnected]) ::reconnecting
+                                                 ([::connected :Disconnected]) [::reconnecting client]
                                                  ([::connected :Expired] [::watching :Expired])
                                                  , (do (reset! zap (promise)) [::connecting (new-client)]) ; testing only?
                                                  [::connected ::watch-added]
                                                  , (do (deliver @zap client) [::watching client]) ; the ideal steady-state
-                                                 [::watching ::heartbeat] [::watching client] ; the ideal steady-state Part Deux
-                                                 ([::connecting ::heartbeat] [::connected ::heartbeat] [::reconnecting ::heartbeat])
-                                                 , [state client]
                                                  [::watching :Disconnected] [::reconnecting client]
                                                  ([::reconnecting :SyncConnected] [::reconnecting :ConnectedReadOnly])
                                                  , [::watching client] ; watches survive
-                                                 [::reconnecting :Expired] (do (reset! zap (promise))
-                                                                               [::connecting (new-client)])
+                                                 [::reconnecting :Expired] (do (reset! zap (promise)) [::connecting (new-client)])
                                                  ([::connecting ::close!] [::connected ::close!] [::watching ::close!] [::reconnecting ::close!])
                                                  , (do (reset! zap (promise))
                                                        (if (async/<! (async/thread (.close ^ZooKeeper client timeout)))
@@ -190,7 +183,7 @@
         java.lang.AutoCloseable
         (close [this]
           (async/close! command)
-          (let [result (async/<!! result)] (log/debugf "Closed with %s." result))
+          (log/spyf :debug "Closed with %s." (async/<!! result))
           (.close! this))
         clojure.lang.IDeref
         (deref [this] (deref @zap))
