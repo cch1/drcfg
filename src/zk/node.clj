@@ -148,13 +148,13 @@
   (watch [this pub]
     (log/tracef "Watching %s" (str this))
     (let [handle-channel-error (fn [e] (log/errorf e "Exception while processing channel event for %s" (str this)))
-          callback-reports (async/chan 8 (comp) handle-channel-error)]
+          callback-reports (async/chan 8 (comp) handle-channel-error)
+          sub (async/chan 2)]
 
       (async/go ; Boot the node watch
         (let [{:keys [rc stat] :as report} (async/<! (get-existence this (async/chan) {:tag ::exists}))]
           (case (first (client/translate-return-code rc))
-            :OK (do (async/>! callback-reports report)
-                    (get-data this callback-reports {:tag ::sync-data}))
+            :OK (async/>! callback-reports report)
             :NONODE (let [{:keys [rc stat] :as report} (async/<! (create! this (async/chan) {}))]
                       (case (first (client/translate-return-code rc))
                         :OK (async/>! callback-reports report)
@@ -196,21 +196,22 @@
                            ::void (do (assert (= ::deleted tag)) watched)  ; analagous watch is responsible for housekeeping
                            (throw (Exception. (format "Unexpected callback type %s for %s" type this))))))))))
 
-        (get-children this callback-reports {:tag ::sync-children}) ; OPTIMIZE: check for (pos? numChildren)
-
-        (let [sub (async/sub pub (.path this) (async/chan 2) true)]
-          (async/go-loop [] ; now start listening
-            (if-let [{:keys [type] :as event} (async/<! sub)]
-              (do (log/debugf "%-20s Received watch event %25s" this type)
-                  (case type
-                    :NodeCreated nil ; processed by callback, but late-arriving subscribed event can occur
-                    :NodeDataChanged (get-data this callback-reports {:tag ::data-changed})
-                    :NodeChildrenChanged (get-children this callback-reports {:tag ::children-changed})
-                    :NodeDeleted (do (async/>! events {::type ::deleted!}) (async/close! sub))
-                    (throw (Exception. (format "Unexpected event %s for %s" event this))))
-                  (recur))
-              (do (async/close! callback-reports)
-                  (log/debugf "The watch event channel closed; shutting down %s" this)))))
+        (async/>! sub {:type ::Boot}) ; ensure Boot is processed before any "naturally occuring events"
+        (async/sub pub (.path this) sub true)
+        (async/go-loop [] ; now start listening
+          (if-let [{:keys [type] :as event} (async/<! sub)]
+            (do (log/debugf "%-20s Received watch event %25s" this type)
+                (case type
+                  :NodeCreated nil ; processed by callback, but late-arriving subscribed event can occur
+                  :NodeDataChanged (get-data this callback-reports {:tag ::data-changed})
+                  :NodeChildrenChanged (get-children this callback-reports {:tag ::children-changed})
+                  :NodeDeleted (do (async/>! events {::type ::deleted!}) (async/close! sub))
+                  ::Boot (do (get-data this callback-reports {:tag ::sync-data})
+                             (get-children this callback-reports {:tag ::sync-children}))
+                  (throw (Exception. (format "Unexpected event %s for %s" event this))))
+                (recur))
+            (do (async/close! callback-reports)
+                (log/debugf "The watch event channel closed; shutting down %s" this))))
         this)))
 
   (create! [this options] (let [{:keys [rc stat]} (async/<!! (create! this (async/chan) options))]
