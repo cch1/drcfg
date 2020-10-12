@@ -268,6 +268,18 @@
 (defchecker znode-at [expected-path]
   (checker [actual] (= (.path actual) expected-path)))
 
+(fact "The tree can be walked"
+      (let [sync (fn sync [node] (while (not= ::znode/synchronized (::znode/type (async/<!! node)))) node)
+            root (new-root)
+            child0 (add-descendant root "/child0" 0)
+            child1 (add-descendant root "/child1" (with-meta #{1 2 3} {:foo "bar"}))
+            grandchild (add-descendant root "/child0/grandchild" 0)]
+        (walk root) => (just #{root child0 child1 grandchild}) ; walk the tree offline
+        (with-open [_ (open root (str connect-string sandbox))])  ; actualize the tree
+        (let [root' (new-root)]
+          (with-open [_ (open root' (str connect-string sandbox))] ; walk the discovered tree
+            (walk root' name) => (just #{"" "child0" "child1" "grandchild"})))))
+
 (future-fact "The tree can be walked"
              (let [$root (new-root)
                    $child0 (add-descendant $root "/child0" 0)

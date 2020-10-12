@@ -345,3 +345,10 @@
 (defmethod clojure.pprint/simple-dispatch ZNode
   [^zk.node.ZNode znode]
   (pr znode))
+
+(defn walk
+  "Walk the tree starting at `root` returning a lazy sequence of `(`f` node) for each node visited"
+  ([root] (walk root identity))
+  ([root f] ((fn walk [node]
+               (lazy-seq
+                (cons (f node) (mapcat walk (seq node))))) root)))
