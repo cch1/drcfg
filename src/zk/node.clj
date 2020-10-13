@@ -198,12 +198,14 @@
                                    ::stat (do (dosync (ref-set sref stat))
                                               (async/>! events {::type tag ::stat stat})
                                               watched)
-                                   ::data (do (when (not (awaiting' ::sync-data))
-                                                (let [value ((comp deserialize decode) data)
-                                                      old (dosync (ref-set sref stat)
-                                                                  (let [old @vref] (ref-set vref value) old))]
-                                                  (when (not (and (= value old) (= (type value) (type old))))
-                                                    (async/>! events {::type tag ::stat stat ::value value}))))
+                                   ::data (do (if data
+                                                (when (not (awaiting' ::sync-data))
+                                                  (let [value ((comp deserialize decode) data)
+                                                        old (dosync (ref-set sref stat)
+                                                                    (let [old @vref] (ref-set vref value) old))]
+                                                    (when (not (and (= value old) (= (type value) (type old))))
+                                                      (async/>! events {::type tag ::stat stat ::value value}))))
+                                                (log/infof "Dataless node encountered %s" this))
                                               watched)
                                    ::children (if (not (awaiting' ::sync-children))
                                                 (let [[ins rem] (dosync (ref-set sref stat)

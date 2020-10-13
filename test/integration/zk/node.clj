@@ -15,6 +15,7 @@
 (def connect-string (.getConnectString test-server))
 
 (def sandbox "/sandbox")
+(def ^:dynamic *c*)
 
 (defchecker having-metadata [expected-value expected-metadata]
   (every-checker (chatty-checker [actual] (extended-= actual expected-value))
@@ -31,9 +32,10 @@
   (checker [actual] (= (.path actual) expected-path)))
 
 (background (around :facts (with-open [c (zoo/connect connect-string)]
-                             (zoo/delete-all c sandbox)
-                             (zoo/create c sandbox :persistent? true :async? false :data (.getBytes ":zk.node/root"))
-                             ?form)))
+                             (binding [*c* c]
+                               (zoo/delete-all c sandbox)
+                               (zoo/create c sandbox :persistent? true :async? false :data (.getBytes ":zk.node/root"))
+                               ?form))))
 
 (fact "Can open and close a ZNode"
       (let [$root (new-root)
@@ -290,3 +292,9 @@
         (let [root' (new-root)]
           (with-open [_ (open root' (str connect-string sandbox))] ; walk the discovered tree
             (walk root' name) => (just #{"" "child0" "child1" "grandchild"})))))
+
+(facts "Bizzare data-less nodes don't wreak havoc when read"
+       (zoo/create *c* (str sandbox "/my-node"))
+       (let [root (new-root)]
+         (with-open [_ (open root (str connect-string sandbox))]
+           (root "/my-node") => (has-ref-state [(stat? {:dataLength 0}) ::znode/placeholder #{}]))))
