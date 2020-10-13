@@ -159,3 +159,10 @@
         (= x $child0) => true
         (= (hash x) (hash $child0)) => true
         (clojure.set/difference #{$child0 $child1} #{$child1}) => #{$child0}))
+
+(fact "The ZNode tree can be walked"
+      (let [root (new-root)
+            child0 (add-descendant root "/child0" 0)
+            child1 (add-descendant root "/child1" (with-meta #{1 2 3} {:foo "bar"}))
+            grandchild (add-descendant root "/child0/grandchild" 0)]
+        (walk root) => (just #{root child0 child1 grandchild}))) ; there is a partial order, but midje is clunky at testing.

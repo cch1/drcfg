@@ -24,6 +24,12 @@
   (let [builder (fn [actual] (dosync [(deref (.sref actual)) (deref (.vref actual)) (deref (.cref actual))]))]
     (chatty-checker [actual] (extended-= (builder actual) (just expected-value)))))
 
+(defchecker named? [expected]
+  (checker [actual] (= (name actual) expected)))
+
+(defchecker znode-at [expected-path]
+  (checker [actual] (= (.path actual) expected-path)))
+
 (background (around :facts (with-open [c (zoo/connect connect-string)]
                              (zoo/delete-all c sandbox)
                              (zoo/create c sandbox :persistent? true :async? false :data (.getBytes ":zk.node/root"))
@@ -61,39 +67,33 @@
                                                       (just #::znode{:type ::znode/synchronized :stat (stat? {})})]))
           $child => (has-ref-state [(stat? {:version 0}) 0 empty?])
           (update! $child 1 0 {}) => (stat? {})
-          $child => (eventually-streams 1 5000 (just [(just #::znode{:type ::znode/data-changed :value 1 :stat (stat? {:version 1})})])))
+          $child => (eventually-streams 1 1000 (just [(just #::znode{:type ::znode/data-changed :value 1 :stat (stat? {:version 1})})])))
         $child => (has-ref-state [(stat? {:version 1}) 1 empty?])))
 
 (fact "Existing ZNodes are acquired and stream their current value"
-      (let [$root (new-root)
-            $child (add-descendant $root "/child" 0)
-            $grandchild (add-descendant $root "/child/grandchild" 0)]
+      (let [$root (new-root)]
+        (add-descendant $root "/child" 0)
+        (add-descendant $root "/child/grandchild" 0)
+        (with-open [_ (open $root (str connect-string sandbox))]))
+      (let [$root (new-root)]
         (with-open [_ (open $root (str connect-string sandbox))]
-          $child => (eventually-streams 2 1000 (just [(just #::znode{:type ::znode/created! :stat (stat? {})})
-                                                      (just #::znode{:type ::znode/synchronized :stat (stat? {})})]))
-          $grandchild => (eventually-streams 2 1000 (just [(just #::znode{:type ::znode/created! :stat (stat? {})})
-                                                           (just #::znode{:type ::znode/synchronized :stat (stat? {})})])))
-        ;; ensure spurious wrongly-pathed acquired children don't appear
-        (let [$root (new-root)]
-          (with-open [_ (open $root (str connect-string sandbox))]
-            $root => (eventually-streams 3 2000 (just [(just #::znode{:type ::znode/exists :stat (stat? {:version 0})})
-                                                       (just #::znode{:type ::znode/sync-children :stat (stat? {:cversion 1})
-                                                                      :inserted (one-of (partial instance? zk.node.ZNode))
-                                                                      :removed empty?})
-                                                       (just #::znode{:type ::znode/synchronized :stat (stat? {})})]))
-            (let [$child ($root "/child")]
-              $child => (partial instance? zk.node.ZNode)
-              $child => (eventually-streams 3 2000 (just [(just #::znode{:type ::znode/exists :stat (stat? {:version 0})})
-                                                          (just #::znode{:type ::znode/sync-data :value 0 :stat (stat? {:version 0})})
-                                                          (just #::znode{:type ::znode/sync-children :stat (stat? {:cversion 1})
-                                                                         :inserted (one-of (partial instance? zk.node.ZNode))
-                                                                         :removed empty?})]))
-              (let [$grandchild ($root "/child/grandchild")]
-                $grandchild => (partial instance? zk.node.ZNode)
-                $grandchild => (eventually-streams 2 2000 (just [(just #::znode{:type ::znode/exists :stat (stat? {:version 0})})
-                                                                 (just #::znode{:type ::znode/sync-data :value 0 :stat (stat? {:version 0})})]))
-                $child => (eventually-streams 1 1000 (just [(just #::znode{:type ::znode/synchronized :stat (stat? {})})])))
-              $root => (has-ref-state [(stat? {:version 0}) anything (just #{$child})]))))))
+          $root => (eventually-streams 3 2000 (just [(just #::znode{:type ::znode/exists :stat (stat? {:version 0})})
+                                                     (just #::znode{:type ::znode/sync-children :stat (stat? {:cversion 1})
+                                                                    :inserted (just #{(named? "child")})
+                                                                    :removed empty?})
+                                                     (just #::znode{:type ::znode/synchronized :stat (stat? {})})]))
+          (let [$child ($root "/child")]
+            $child => (eventually-streams 3 2000 (just [(just #::znode{:type ::znode/exists :stat (stat? {:version 0})})
+                                                        (just #::znode{:type ::znode/sync-data :value 0 :stat (stat? {:version 0})})
+                                                        (just #::znode{:type ::znode/sync-children :stat (stat? {:cversion 1})
+                                                                       :inserted (just #{(named? "grandchild")})
+                                                                       :removed empty?})]))
+            (let [$grandchild ($root "/child/grandchild")]
+              $grandchild => (partial instance? zk.node.ZNode)
+              $grandchild => (eventually-streams 2 2000 (just [(just #::znode{:type ::znode/exists :stat (stat? {:version 0})})
+                                                               (just #::znode{:type ::znode/sync-data :value 0 :stat (stat? {:version 0})})]))
+              $child => (eventually-streams 1 1000 (just [(just #::znode{:type ::znode/synchronized :stat (stat? {})})])))
+            $root => (has-ref-state [(stat? {:version 0}) anything (just #{$child})])))))
 
 (fact "Existing ZNodes do not stream confirmed value at startup when local and remote values are equal"
       (let [$root (new-root)
@@ -250,6 +250,21 @@
                  (signature $grandchild) => (just [integer? -1249580007])
                  (signature $root) => (just [integer? -1188681409]))))
 
+(fact "Cluster-only children will be adopted even while local-only nodes are persisted."
+      (let [$root (new-root)
+            $child0 (add-descendant $root "/child0" 0)
+            $child1 (add-descendant $root "/child1" 1)]
+        (with-open [_ (open $root (str connect-string sandbox))]))
+      (let [$root (new-root)
+            $child2 (add-descendant $root "/child2" 2)
+            $child3 (add-descendant $root "/child3" 3)]
+        (with-open [_ (open $root (str connect-string sandbox))]
+          $root => (eventually-streams 3 2000 (just [(just #::znode{:type ::znode/exists :stat (stat? {})})
+                                                     (just #::znode{:type ::znode/sync-children :stat (stat? {})
+                                                                    :inserted (just #{(named? "child0") (named? "child1")}) :removed #{}})
+                                                     (just #::znode{:type ::znode/synchronized :stat (stat? {:numChildren 4})})])))
+        $root => (has-ref-state [(stat? {:numChildren 4}) ::znode/root (just #{(named? "child0") (named? "child1") (named? "child2") (named? "child3")})])))
+
 (fact "Added descendant ZNodes can be created and will merge into watched tree"
       (let [$root (new-root)
             $child (add-descendant $root "/child" 0)]
@@ -265,12 +280,8 @@
         (let [$grandchild ($root "/child/grandchild")]
           $grandchild => (eventually-streams 1 1000 [::th/timeout]))))
 
-(defchecker znode-at [expected-path]
-  (checker [actual] (= (.path actual) expected-path)))
-
 (fact "The tree can be walked"
-      (let [sync (fn sync [node] (while (not= ::znode/synchronized (::znode/type (async/<!! node)))) node)
-            root (new-root)
+      (let [root (new-root)
             child0 (add-descendant root "/child0" 0)
             child1 (add-descendant root "/child1" (with-meta #{1 2 3} {:foo "bar"}))
             grandchild (add-descendant root "/child0/grandchild" 0)]
@@ -279,33 +290,3 @@
         (let [root' (new-root)]
           (with-open [_ (open root' (str connect-string sandbox))] ; walk the discovered tree
             (walk root' name) => (just #{"" "child0" "child1" "grandchild"})))))
-
-(future-fact "The tree can be walked"
-             (let [$root (new-root)
-                   $child0 (add-descendant $root "/child0" 0)
-                   $child1 (add-descendant $root "/child1" (with-meta #{1 2 3} {:foo "bar"}))
-                   $grandchild (add-descendant $root "/child0/grandchild" 0)]
-               (with-open [_ (open $root (str connect-string sandbox))]
-                 $root => (eventually-streams 4 3000 (contains #{#::znode{:type ::znode/watch-start}}))
-                 $child0 => (eventually-streams 4 3000 (contains #{#::znode{:type ::znode/watch-start}}))
-                 $child1 => (eventually-streams 4 3000 (contains #{#::znode{:type ::znode/watch-start}}))
-                 $grandchild => (eventually-streams 4 3000 (contains #{#::znode{:type ::znode/watch-start}})))
-               (znode/walk (str connect-string sandbox) 500 identity conj ()) => (contains #{(znode-at "/") (znode-at "/child0")
-                                                                                             (znode-at "/child1") (znode-at "/child0/grandchild")})))
-
-(defchecker named? [expected]
-  (checker [actual] (= (name actual) expected)))
-
-(future-fact "The tree can be walked with proper treatment of transducer and scope"
-             (let [$root (new-root)
-                   $c0 (add-descendant $root "/c0" "c0")
-                   $gc10 (add-descendant $c0 "/gc10" "gc10")
-                   $gc11 (add-descendant $c0 "/gc11" "gc11")
-                   $blacksheep (add-descendant $c0 "/blacksheep" "baa")]
-               (with-open [_ (open $root (str connect-string sandbox) {:timeout 5000})]
-                 $gc10 => (eventually-streams 4 3000 (contains #{#::znode{:type ::znode/watch-start}}))
-                 $gc11 => (eventually-streams 4 3000 (contains #{#::znode{:type ::znode/watch-start}}))
-                 $blacksheep => (eventually-streams 4 3000 (contains #{#::znode{:type ::znode/watch-start}})))
-               (walk (str connect-string sandbox "/c0") 500 (remove #(re-find #"b" (name %))) conj ())
-               => (every-checker (has every? (partial instance? roomkey.znode.ZNode))
-                                 (just #{(named? "") (named? "gc10") (named? "gc11")}))))

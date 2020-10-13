@@ -149,27 +149,48 @@
     (log/tracef "Watching %s" (str this))
     (let [handle-channel-error (fn [e] (log/errorf e "Exception while processing channel event for %s" (str this)))
           callback-reports (async/chan 8 (comp) handle-channel-error)
-          sub (async/chan 2)
-          sync (async/chan 1)]
+          sub (async/chan 8)
+          sync (async/chan)]
 
-      (async/go ; Boot the node watch
-        (let [{:keys [rc stat] :as report} (async/<! (get-existence this (async/chan) {:tag ::exists}))]
-          (case (first (client/translate-return-code rc))
-            :OK (async/>! callback-reports report)
-            :NONODE (let [{:keys [rc stat] :as report} (async/<! (create! this (async/chan) {}))]
-                      (case (first (client/translate-return-code rc))
-                        :OK (async/>! callback-reports report)
-                        (let [[ex _] (client/kex-info rc "Can't establish node" {::node this})] (throw ex))))))
+      (async/go-loop [] ; Start the node event listener loop, but don't connect to the pub yet
+        (if-let [{:keys [type] :as event} (async/<! sub)]
+          (do
+            (log/debugf "%-20s Received watch event %25s" this type)
+            (case type
+              :NodeCreated nil ; processed by callback, but late-arriving subscribed event can occur
+              :NodeDataChanged (get-data this callback-reports {:tag ::data-changed})
+              :NodeChildrenChanged (get-children this callback-reports {:tag ::children-changed})
+              :NodeDeleted (do (async/>! events {::type ::deleted!}) (async/close! sub))
+              (throw (Exception. (format "Unexpected event %s for %s" event this))))
+            (recur))
+          (do (async/close! callback-reports)
+              (log/debugf "The watch event channel closed; shutting down %s" this))))
 
-        (let [watched (async/<! (async/into #{} (async/merge (mapv #(watch % pub) @cref))))] ; child watches must complete before starting go-loop
-          (async/go-loop [watched watched seen #{}]
+      (async/go ; Establish the node
+        (let [{:keys [rc stat] :as report} (async/<! (get-existence this (async/chan) {:tag ::exists}))
+              awaiting (case (first (client/translate-return-code rc))
+                         :OK (do (async/>! callback-reports report)
+                                 (async/<! (async/into #{} (async/merge (mapv #(watch % pub) @cref)))) ; wait for children
+                                 (async/sub pub (.path this) sub true) ; connect to the firehose of events
+                                 (get-data this callback-reports {:tag ::sync-data})
+                                 (get-children this callback-reports {:tag ::sync-children})
+                                 #{::exists ::sync-data ::sync-children})
+                         :NONODE (let [{:keys [rc stat] :as report} (async/<! (create! this (async/chan) {}))]
+                                   (case (first (client/translate-return-code rc))
+                                     :OK (do (async/>! callback-reports report)
+                                             (async/<! (async/into #{} (async/merge (mapv #(watch % pub) @cref)))) ; wait for children
+                                             (async/sub pub (.path this) sub true) ; connect to the firehose of events
+                                             #{::created!})
+                                     ;; :NODEEXISTS nil ; unlikely race condition ... FIXME
+                                     (let [[ex _] (client/kex-info rc "Can't establish node" {::node this})] (throw ex)))))]
+
+          (async/go-loop [watched @cref awaiting awaiting]
             (when-let [{:keys [type tag rc stat name data children] :as report} (async/<! callback-reports)]
-              (let [result (first (client/translate-return-code rc))
-                    stat (when stat (stat-to-map stat))]
-                (log/logf (if (= :OK result) :debug :warn) "%-20s Callback report: %13s of %-12s" this (clojure.core/name type) result)
+              (let [result (first (client/translate-return-code rc))]
+                (log/logf (if (= :OK result) :debug :warn) "%-18s Callback report: %16s %-11s" this (clojure.core/name tag) result)
                 (when (= :OK result)
-                  (let [synced? (apply some-fn (map (partial comp (partial every? identity)) [(juxt ::create) (juxt ::data ::children) (juxt ::void)]))
-                        seen' (conj seen type)
+                  (let [stat (when stat (stat-to-map stat))
+                        awaiting' (disj awaiting tag)
                         watched' (case type
                                    ::create (do (dosync (ref-set sref stat))
                                                 (async/>! events {::type tag ::stat stat})
@@ -177,48 +198,34 @@
                                    ::stat (do (dosync (ref-set sref stat))
                                               (async/>! events {::type tag ::stat stat})
                                               watched)
-                                   ::data (let [value ((comp deserialize decode) data)
-                                                old (dosync (ref-set sref stat)
-                                                            (let [old @vref] (ref-set vref value) old))]
-                                            (when (not (and (= value old) (= (type value) (type old))))
-                                              (async/>! events {::type tag ::stat stat ::value value}))
-                                            watched)
-                                   ::children (let [[ins rem] (dosync (ref-set sref stat)
-                                                                      (let [rmt (into #{} (map #(create-child this % ::placeholder)) children)
-                                                                            [ins rem] (delta rmt @cref)]
-                                                                        (apply alter cref conj ins)
-                                                                        (apply alter cref disj rem)
-                                                                        [ins rem]))]
-                                                (log/debugf "%-20s ****A***** %s -- %s" this ins rem)
-                                                (when (or (seq ins) (seq rem))
-                                                  (async/>! events {::type tag ::stat stat ::inserted ins ::removed rem}))
-                                                (let [[ins rem] (delta @cref watched)]
-                                                  (log/debugf "%-20s ****W***** %s -- %s" this ins rem)
-                                                  (async/<! (async/into #{} (async/merge (mapv #(watch % pub) ins))))
-                                                  (-> watched (conj ins) (disj rem))))
-                                   ::void (do (assert (= ::deleted tag)) watched) ; analagous watch is responsible for housekeeping
+                                   ::data (do (when (not (awaiting' ::sync-data))
+                                                (let [value ((comp deserialize decode) data)
+                                                      old (dosync (ref-set sref stat)
+                                                                  (let [old @vref] (ref-set vref value) old))]
+                                                  (when (not (and (= value old) (= (type value) (type old))))
+                                                    (async/>! events {::type tag ::stat stat ::value value}))))
+                                              watched)
+                                   ::children (if (not (awaiting' ::sync-children))
+                                                (let [[ins rem] (dosync (ref-set sref stat)
+                                                                        (let [rmt (into #{} (map #(create-child this % ::placeholder)) children)
+                                                                              [ins rem] (delta rmt @cref)]
+                                                                          (apply alter cref conj ins)
+                                                                          (apply alter cref disj rem)
+                                                                          [ins rem]))]
+                                                  (log/debugf "%-20s ****A***** %s -- %s" this ins rem)
+                                                  (when (or (seq ins) (seq rem))
+                                                    (async/>! events {::type tag ::stat stat ::inserted ins ::removed rem}))
+                                                  (let [[ins rem] (delta @cref watched)]
+                                                    (log/debugf "%-20s ****W***** %s -- %s" this ins rem)
+                                                    (async/<! (async/into #{} (async/merge (mapv #(watch % pub) ins))))
+                                                    (apply conj (apply disj watched rem) ins)))
+                                                watched)
+                                   ::void (do (assert (= ::deleted tag)) watched) ; corresponding watch is responsible for housekeeping
                                    (throw (Exception. (format "Unexpected callback type %s for %s" type this))))]
-                    (when (and (not (synced? seen)) (synced? seen'))
+                    (when (and (not (empty? awaiting)) (empty? awaiting'))
                       (async/>! events {::type ::synchronized ::stat stat})
-                      (async/>! sync this))
-                    (recur watched' seen')))))))
-
-        (async/>! sub {:type ::Boot}) ; ensure Boot is processed before any "naturally occuring events"
-        (async/sub pub (.path this) sub true)
-        (async/go-loop [] ; now start listening
-          (if-let [{:keys [type] :as event} (async/<! sub)]
-            (do (log/debugf "%-20s Received watch event %25s" this type)
-                (case type
-                  :NodeCreated nil ; processed by callback, but late-arriving subscribed event can occur
-                  :NodeDataChanged (get-data this callback-reports {:tag ::data-changed})
-                  :NodeChildrenChanged (get-children this callback-reports {:tag ::children-changed})
-                  :NodeDeleted (do (async/>! events {::type ::deleted!}) (async/close! sub))
-                  ::Boot (do (get-data this callback-reports {:tag ::sync-data})
-                             (get-children this callback-reports {:tag ::sync-children}))
-                  (throw (Exception. (format "Unexpected event %s for %s" event this))))
-                (recur))
-            (do (async/close! callback-reports)
-                (log/debugf "The watch event channel closed; shutting down %s" this))))
+                      (async/close! sync))
+                    (recur watched' awaiting')))))))
         (async/<! sync))))
 
   (create! [this options] (let [{:keys [rc stat]} (async/<!! (create! this (async/chan) options))]
@@ -327,10 +334,8 @@
 (defn open
   "Open a resilient ZooKeeper client connection and watch for events on `root` and its descendants"
   [^zk.node.ZNode root cstring & args]
-  (let [client (.client root)
-        chandle (client/open client cstring args)
-        pub (async/pub chandle :path)]
-    (async/<!! (watch root pub))
+  (let [chandle (client/open (.client root) cstring args)]
+    (async/<!! (watch root (async/pub chandle :path)))
     chandle))
 
 ;; https://stackoverflow.com/questions/49373252/custom-pprint-for-defrecord-in-nested-structure
