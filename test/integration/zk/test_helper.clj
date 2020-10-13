@@ -59,17 +59,18 @@
 
 (defchecker stat? [expected]
   ;; The key to chatty checkers is to have the useful intermediate results be the evaluation of arguments to top-level expressions!
-  (every-checker (contains {:version int?
-                            :cversion int?
-                            :aversion int?
-                            :ctime (partial instance? java.time.Instant)
-                            :mtime (partial instance? java.time.Instant)
-                            :mzxid pos-int?
-                            :czxid pos-int?
-                            :pzxid pos-int?
-                            :numChildren int?
-                            :ephemeralOwner int?
-                            :dataLength int?})
+  (every-checker (some-checker (just {:version int?
+                                      :cversion int?
+                                      :aversion int?
+                                      :ctime (partial instance? java.time.Instant)
+                                      :mtime (partial instance? java.time.Instant)
+                                      :mzxid pos-int?
+                                      :czxid pos-int?
+                                      :pzxid pos-int?
+                                      :numChildren int?
+                                      :ephemeralOwner int?
+                                      :dataLength int?})
+                               (just {:version -1 :cversion -1 :aversion -1}))
                  (contains expected)))
 
 (defchecker event? [expected]

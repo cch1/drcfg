@@ -160,7 +160,7 @@
               :NodeCreated nil ; processed by callback, but late-arriving subscribed event can occur
               :NodeDataChanged (get-data this callback-reports {:tag ::data-changed})
               :NodeChildrenChanged (get-children this callback-reports {:tag ::children-changed})
-              :NodeDeleted (do (async/>! events {::type ::deleted!}) (async/close! sub))
+              :NodeDeleted (do (async/>! events {::type ::deleted! ::stat default-stat}) (async/close! sub))
               (throw (Exception. (format "Unexpected event %s for %s" event this))))
             (recur))
           (do (async/close! callback-reports)

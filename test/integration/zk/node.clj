@@ -173,7 +173,7 @@
           $child => (eventually-streams 2 1000 (just [(just #::znode{:type ::znode/created! :stat (stat? {})})
                                                       (just #::znode{:type ::znode/synchronized :stat (stat? {})})]))
           (delete! $child 0 {}) => truthy
-          $child => (eventually-streams 1 1000 (just [#::znode{:type ::znode/deleted!}])))
+          $child => (eventually-streams 1 1000 (just [(contains #::znode{:type ::znode/deleted! :stat (stat? {:version -1})})])))
         $root => (has-ref-state [(stat? {:cversion 2}) anything empty?])))
 
 (fact "Existing ZNodes can be deleted"
@@ -186,7 +186,7 @@
           $child => (eventually-streams 2 1000 (just [(just #::znode{:type ::znode/exists :stat (stat? {:version 0})})
                                                       (just #::znode{:type ::znode/synchronized :stat (stat? {})})]))
           (delete! $child 0 {}) => truthy
-          $child => (eventually-streams 1 1000 (just #{#::znode{:type ::znode/deleted!}})))))
+          $child => (eventually-streams 1 1000 (just [(just #::znode{:type ::znode/deleted! :stat (stat? {:version -1})})])))))
 
 (fact "Children do not intefere with their parents, regardless of insertion sequence"
       (let [$root (new-root)
