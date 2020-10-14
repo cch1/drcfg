@@ -5,6 +5,12 @@ Note that versioning is managed using [lein-v](https://clojars.org/com.roomkey/l
 
 ## [Unreleased](https://github.com/cch1/drcfg/compare/v7.1.0...HEAD) ##
 
+### Changed ###
+- Adopt the persistent recursive watches available since Zookeeper 3.6.0.  This is not an optional requirement so please ensure your cluster is running Zookeeper version 3.6.0 or later.
+- Changed the namespaces providing the functionality.  Instead of living under the `roomkey` namespace, all functionality now lives under the `zk` namespace.  Otherwise new namespaces are obviously named to correspond to the old namespaces with only the removal of the initial `z` from znode and zclient.  Corresponding test namespaces have been renamed as well.
+- Changed namespaces: the top-level `zk.drcfg` namespace is 100% backwards compatible with its corresponding legacy `roomkey.drcfg` namespace.  Lower-level namespaces such as `zk.zref` (previously `roomkey.zref`) and `zk.node` (previously `roomkey.znode`) are highly backwards-compatible.  However, the `zk.client` namespace (previously the `roomkey.zclient` namespace`) has changed more substantially.
+
+
 ## [7.1.0](https://github.com/cch1/drcfg/compare/v7.0.1...v7.1.0) ##
 
 ### Fixed ###
