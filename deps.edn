@@ -16,4 +16,36 @@
         :jvm-opts ["-Djava.io.tmpdir=./tmp"
                    "-Dclojure.core.async.go-checking=true"
                    "-Dclojure.tools.logging.factory=clojure.tools.logging.impl/slf4j-factory"]}
-  :test {:extra-paths ["test" "test-resources"]}}}
+  :test {:extra-paths ["test" "test-resources"]}
+  ;; --------------------------- Build/Deploy Tasks ----------------------------
+  ;; Generate a basic `pom.xml` file:
+  ;; $ clojure -X:deps mvn-pom
+  ;; Bump the version by a patch and generate a corresponding pom file with the groupId "com.hapgood".  Note this lib gets confused by the XML comment that it generates
+  ;; and it cannot modify an existing `pom.xml` file.
+  ;; $ clojure -M:project/pom IncrementType -t
+  :project/pom {:main-opts ["-m" "garamond.main" "--group-id" "com.hapgood" "--scm-url" "https://github.com/cch1/drcfg" "-p"]
+                ;; because we don't need the project's dependencies loaded
+                :replace-deps {com.workframe/garamond {:mvn/version "0.4.0"}}}
+  ;; $ clojure -X:project/jar
+  :project/jar {:replace-deps {seancorfield/depstar {:mvn/version "RELEASE"}}
+                :exec-fn    hf.depstar/jar
+                :exec-args  {:jar "target/drcfg.jar" :verbose true}}
+  ;; Test a local install with:
+  ;; $ clojure -X:project/install
+  ;; :project/install {:replace-deps {org.clojure/tools.deps.alpha {:mvn/version "0.9.816"}
+  ;;                                  org.slf4j/slf4j-nop {:mvn/version "1.7.25"}}
+  ;;                   :ns-default clojure.tools.cli.api
+  ;;                   :exec-fn clojure.tools.cli.api/mvn-install
+  ;;                   ;; pom arg required due to a bug: https://clojure.atlassian.net/browse/TDEPS-169
+  ;;                   :exec-args {:pom "pom.xml" :jar "janus.jar"}}
+  ;; ALTERNATE: locally install the jar locally
+  :project/install {:main-opts ["-m" "deps-deploy.deps-deploy" "install" "target/drcfg.jar" false]
+                    :replace-deps {slipset/deps-deploy {:mvn/version "RELEASE"}
+                                   org.slf4j/slf4j-nop {:mvn/version "RELEASE"}}}
+
+  ;; Next, push code (and tags) to github to ensure they are available when cljdocs goes to find articles.
+  ;; And then, only after the tagged commit is on GitHub:
+  ;; $ env CLOJARS_USERNAME=cch1 CLOJARS_PASSWORD=<redacted> clj -M:project/deploy janus.jar
+  :project/deploy {:main-opts ["-m" "deps-deploy.deps-deploy" "deploy" "target/drcfg.jar" false]
+                   :replace-deps {slipset/deps-deploy {:mvn/version "RELEASE"}
+                                  org.slf4j/slf4j-nop {:mvn/version "RELEASE"}}}}}
