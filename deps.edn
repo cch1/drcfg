@@ -39,14 +39,16 @@
   ;;                   ;; pom arg required due to a bug: https://clojure.atlassian.net/browse/TDEPS-169
   ;;                   :exec-args {:pom "pom.xml" :jar "janus.jar"}}
   ;; ALTERNATE: locally install the jar locally
-  ;; $ clojure -M:project/install
-  :project/install {:main-opts ["-m" "deps-deploy.deps-deploy" "install" "target/drcfg.jar"]
-                    :replace-deps {slipset/deps-deploy {:mvn/version "RELEASE"}
-                                   org.slf4j/slf4j-nop {:mvn/version "RELEASE"}}}
+  ;; $ clojure -X:project/install
+  :project/install {:exec-fn deps-deploy.deps-deploy/deploy
+                    :exec-args {:installer :local :artifact "target/drcfg.jar" :pom-file "pom.xml" :sign-releases? false}
+                    :replace-deps {slipset/deps-deploy {:git/url "https://github.com/slipset/deps-deploy"
+                                                        :sha     "287243b7ccd11b908790925d614429383bafb78e"}}}
 
   ;; Next, push code (and tags) to github to ensure they are available when cljdocs goes to find articles.
   ;; And then, only after the tagged commit is on GitHub:
-  ;; $ env CLOJARS_USERNAME=cch1 CLOJARS_PASSWORD=<redacted> clj -M:project/deploy janus.jar
-  :project/deploy {:main-opts ["-m" "deps-deploy.deps-deploy" "deploy" "target/drcfg.jar"]
-                   :replace-deps {slipset/deps-deploy {:mvn/version "RELEASE"}
-                                  org.slf4j/slf4j-nop {:mvn/version "RELEASE"}}}}}
+  ;; $ env CLOJARS_USERNAME=cch1 CLOJARS_PASSWORD=<redacted> clj -X:project/deploy
+  :project/deploy {:exec-fn deps-deploy.deps-deploy/deploy
+                   :exec-args {:installer :remote :artifact "target/drcfg.jar" :pom-file "pom.xml" :sign-releases? false}
+                   :replace-deps {slipset/deps-deploy {:git/url "https://github.com/slipset/deps-deploy"
+                                                       :sha     "287243b7ccd11b908790925d614429383bafb78e"}}}}}
