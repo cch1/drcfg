@@ -6,7 +6,7 @@
 (defn deps-map []
   (read-string (slurp "deps.edn")))
 
-(defproject com.roomkey/drcfg :lein-v
+(defproject com.hapgood/drcfg :lein-v
   :description "Dynamic Runtime Configuration Utility based on Zookeeper"
   :url "https://github.com/cch1/drcfg"
   :plugins [[com.roomkey/lein-v "7.0.0"]]
