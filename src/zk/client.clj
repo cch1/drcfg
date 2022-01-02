@@ -68,7 +68,8 @@
 
 (defn kex-info
   "Create an ExceptionInfo from the ZooKeeper return code `rc`, message `msg`, supplemental ex-info map `m` and optional `cause`"
-  [rc msg m & cause]
+  ;; TODO: make this a variadic function
+  [rc msg m & [cause]]
   (let [[kcode retry? category] (translate-return-code rc)
         m (merge {::anomalies/category category ::kex-code kcode} m)]
     [(if cause (ex-info msg m cause) (ex-info msg m)) retry?]))
