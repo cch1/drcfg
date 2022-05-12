@@ -38,7 +38,7 @@
                           KeeperException$Code/INVALIDCALLBACK ::anomalies/incorrect
                           KeeperException$Code/MARSHALLINGERROR ::anomalies/incorrect
                           KeeperException$Code/NEWCONFIGNOQUORUM ::anomalies/unavailable
-                          KeeperException$Code/NOAUTH ::anomalies/FORBIDDEN
+                          KeeperException$Code/NOAUTH ::anomalies/forbidden
                           KeeperException$Code/NOCHILDRENFOREPHEMERALS ::anomalies/incorrect
                           KeeperException$Code/NODEEXISTS ::anomalies/conflict
                           KeeperException$Code/NONODE ::anomalies/not-found
@@ -48,7 +48,7 @@
                           KeeperException$Code/OPERATIONTIMEOUT ::anomalies/busy
                           KeeperException$Code/RECONFIGDISABLED ::anomalies/forbidden
                           KeeperException$Code/RECONFIGINPROGRESS ::anomalies/busy
-                          KeeperException$Code/REQUESTTIMEOUT ::anomalies/BUSY
+                          KeeperException$Code/REQUESTTIMEOUT ::anomalies/busy
                           KeeperException$Code/RUNTIMEINCONSISTENCY ::anomalies/fault
                           KeeperException$Code/SESSIONCLOSEDREQUIRESASLAUTH ::anomalies/forbidden ; when does this happen?  Is retry viable?
                           KeeperException$Code/SESSIONEXPIRED ::anomalies/unavailable
