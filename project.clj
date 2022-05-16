@@ -24,5 +24,6 @@
   :jvm-opts ["-Djava.io.tmpdir=./tmp" "-Dclojure.core.async.go-checking=true"]
   :profiles {:dev {:dependencies ~(-> (deps-map) :aliases :dev :extra-deps (deps->pom-deps))}
              :test {:resource-paths ["test-resources"]
-                    :global-vars {*warn-on-reflection* true}}
+                    :global-vars {*warn-on-reflection* true}
+                    :dependencies ~(-> (deps-map) :aliases :test :extra-deps (deps->pom-deps))}
              :reflection {:global-vars {*warn-on-reflection* true}}})
