@@ -1,61 +1,58 @@
-{:deps {org.clojure/clojure {:mvn/version "1.10.1"}
-        org.clojure/tools.logging {:mvn/version "1.1.0"}
-        org.clojure/core.async {:mvn/version "1.3.610"}
-        org.clojure/tools.macro {:mvn/version "0.1.5"}
-        com.cognitect/anomalies {:mvn/version "0.1.12"}
-        org.apache.zookeeper/zookeeper {:mvn/version "3.6.2" :exclusions [org.slf4j/slf4j-log4j12 log4j/log4j]}}
- :paths ["src" "resources"]
- :aliases
- {:dev {:extra-paths ["dev-resources"]
-        :extra-deps {midje/midje {:mvn/version "1.9.9"}
-                     org.slf4j/slf4j-api {:mvn/version "1.7.30"}
-                     org.slf4j/jcl-over-slf4j {:mvn/version "1.7.30"}
-                     org.slf4j/slf4j-log4j12 {:mvn/version "1.7.30"}
-                     log4j/log4j {:mvn/version "1.2.17"}}
-        :jvm-opts ["-Djava.io.tmpdir=./tmp"
-                   "-Dclojure.core.async.go-checking=true"
-                   "-Dclojure.tools.logging.factory=clojure.tools.logging.impl/slf4j-factory"]}
-  :test {:extra-paths ["test" "test-resources"]
-         :extra-deps {org.apache.curator/curator-test {:mvn/version "5.1.0"}
-                      zookeeper-clj/zookeeper-clj {:mvn/version "0.9.4" :exclusions [org.apache.zookeeper/zookeeper]}
-                      midje/midje {:mvn/version "1.9.9"}
-                      metosin/testit {:mvn/version "0.4.1"}}}
-  :test-runner {:extra-deps  {com.cognitect/test-runner {:git/url "https://github.com/cognitect-labs/test-runner.git"
-                                                         :git/sha     "a85b3b02765fb68684ab9ee4a8598eacf7e471d2"}}
-                :main-opts ["-m" "cognitect.test-runner"]
-                :exec-fn cognitect.test-runner.api/test}
-  ;; --------------------------- Build/Deploy Tasks ----------------------------
-  ;; Generate a basic `pom.xml` file:
-  ;; $ clojure -X:deps mvn-pom
-  ;; Bump the version by a patch and generate a corresponding pom file with the groupId "com.hapgood".  Note this lib gets confused by the XML comment that it generates
-  ;; and it cannot modify an existing `pom.xml` file.
-  ;; $ clojure -M:project/pom IncrementType -t
-  :project/pom {:main-opts ["-m" "garamond.main" "--group-id" "com.hapgood" "--scm-url" "https://github.com/cch1/drcfg" "-p"]
-                ;; because we don't need the project's dependencies loaded
-                :replace-deps {com.workframe/garamond {:mvn/version "0.4.0"}}}
-  ;; $ clojure -X:project/jar
-  :project/jar {:replace-deps {seancorfield/depstar {:mvn/version "RELEASE"}}
-                :exec-fn    hf.depstar/jar
-                :exec-args  {:jar "target/drcfg.jar" :verbose true}}
-  ;; Test a local install with:
-  ;; $ clojure -X:project/install
-  ;; :project/install {:replace-deps {org.clojure/tools.deps.alpha {:mvn/version "0.9.816"}
-  ;;                                  org.slf4j/slf4j-nop {:mvn/version "1.7.25"}}
-  ;;                   :ns-default clojure.tools.cli.api
-  ;;                   :exec-fn clojure.tools.cli.api/mvn-install
-  ;;                   ;; pom arg required due to a bug: https://clojure.atlassian.net/browse/TDEPS-169
-  ;;                   :exec-args {:pom "pom.xml" :jar "janus.jar"}}
-  ;; ALTERNATE: locally install the jar locally
-  ;; $ clojure -X:project/install
-  :project/install {:exec-fn deps-deploy.deps-deploy/deploy
-                    :exec-args {:installer :local :artifact "target/drcfg.jar" :pom-file "pom.xml" :sign-releases? false}
-                    :replace-deps {slipset/deps-deploy {:git/url "https://github.com/slipset/deps-deploy"
-                                                        :sha     "287243b7ccd11b908790925d614429383bafb78e"}}}
+{:deps    {org.clojure/clojure            {:mvn/version "1.10.1"}
+           org.clojure/tools.logging      {:mvn/version "1.1.0"}
+           org.clojure/core.async         {:mvn/version "1.3.610"}
+           org.clojure/tools.macro        {:mvn/version "0.1.5"}
+           com.cognitect/anomalies        {:mvn/version "0.1.12"}
+           org.apache.zookeeper/zookeeper {:mvn/version "3.6.2" :exclusions [org.slf4j/slf4j-log4j12 log4j/log4j]}}
+ :paths   ["src" "resources"]
+ :aliases {:dev             {:extra-paths ["dev-resources"]
+                             :extra-deps  {org.slf4j/slf4j-api      {:mvn/version "1.7.30"}
+                                           org.slf4j/jcl-over-slf4j {:mvn/version "1.7.30"}
+                                           org.slf4j/slf4j-log4j12  {:mvn/version "1.7.30"}
+                                           log4j/log4j              {:mvn/version "1.2.17"}}
+                             :jvm-opts    ["-Djava.io.tmpdir=./tmp"
+                                           "-Dclojure.core.async.go-checking=true"
+                                           "-Dclojure.tools.logging.factory=clojure.tools.logging.impl/slf4j-factory"]}
+           :test            {:extra-paths ["test" "test-resources"]
+                             :extra-deps  {org.apache.curator/curator-test {:mvn/version "5.1.0"}
+                                           zookeeper-clj/zookeeper-clj     {:mvn/version "0.9.4" :exclusions [org.apache.zookeeper/zookeeper]}
+                                           metosin/testit                  {:mvn/version "0.4.1"}}}
+           :test-runner     {:extra-deps {com.cognitect/test-runner {:git/url "https://github.com/cognitect-labs/test-runner.git"
+                                                                     :git/sha "a85b3b02765fb68684ab9ee4a8598eacf7e471d2"}}
+                             :main-opts  ["-m" "cognitect.test-runner"]
+                             :exec-fn    cognitect.test-runner.api/test}
+           ;; --------------------------- Build/Deploy Tasks ----------------------------
+           ;; Generate a basic `pom.xml` file:
+           ;; $ clojure -X:deps mvn-pom
+           ;; Bump the version by a patch and generate a corresponding pom file with the groupId "com.hapgood".  Note this lib gets confused by the XML comment that it generates
+           ;; and it cannot modify an existing `pom.xml` file.
+           ;; $ clojure -M:project/pom IncrementType -t
+           :project/pom     {:main-opts    ["-m" "garamond.main" "--group-id" "com.hapgood" "--scm-url" "https://github.com/cch1/drcfg" "-p"]
+                             ;; because we don't need the project's dependencies loaded
+                             :replace-deps {com.workframe/garamond {:mvn/version "0.4.0"}}}
+           ;; $ clojure -X:project/jar
+           :project/jar     {:replace-deps {seancorfield/depstar {:mvn/version "RELEASE"}}
+                             :exec-fn      hf.depstar/jar
+                             :exec-args    {:jar "target/drcfg.jar" :verbose true}}
+           ;; Test a local install with:
+           ;; $ clojure -X:project/install
+           ;; :project/install {:replace-deps {org.clojure/tools.deps.alpha {:mvn/version "0.9.816"}
+           ;;                                  org.slf4j/slf4j-nop {:mvn/version "1.7.25"}}
+           ;;                   :ns-default clojure.tools.cli.api
+           ;;                   :exec-fn clojure.tools.cli.api/mvn-install
+           ;;                   ;; pom arg required due to a bug: https://clojure.atlassian.net/browse/TDEPS-169
+           ;;                   :exec-args {:pom "pom.xml" :jar "janus.jar"}}
+           ;; ALTERNATE: locally install the jar locally
+           ;; $ clojure -X:project/install
+           :project/install {:exec-fn      deps-deploy.deps-deploy/deploy
+                             :exec-args    {:installer :local :artifact "target/drcfg.jar" :pom-file "pom.xml" :sign-releases? false}
+                             :replace-deps {slipset/deps-deploy {:git/url "https://github.com/slipset/deps-deploy"
+                                                                 :sha     "287243b7ccd11b908790925d614429383bafb78e"}}}
 
-  ;; Next, push code (and tags) to github to ensure they are available when cljdocs goes to find articles.
-  ;; And then, only after the tagged commit is on GitHub:
-  ;; $ env CLOJARS_USERNAME=cch1 CLOJARS_PASSWORD=<redacted> clj -X:project/deploy
-  :project/deploy {:exec-fn deps-deploy.deps-deploy/deploy
-                   :exec-args {:installer :remote :artifact "target/drcfg.jar" :pom-file "pom.xml" :sign-releases? false}
-                   :replace-deps {slipset/deps-deploy {:git/url "https://github.com/slipset/deps-deploy"
-                                                       :sha     "287243b7ccd11b908790925d614429383bafb78e"}}}}}
+           ;; Next, push code (and tags) to github to ensure they are available when cljdocs goes to find articles.
+           ;; And then, only after the tagged commit is on GitHub:
+           ;; $ env CLOJARS_USERNAME=cch1 CLOJARS_PASSWORD=<redacted> clj -X:project/deploy
+           :project/deploy {:exec-fn      deps-deploy.deps-deploy/deploy
+                            :exec-args    {:installer :remote :artifact "target/drcfg.jar" :pom-file "pom.xml" :sign-releases? false}
+                            :replace-deps {slipset/deps-deploy {:git/url "https://github.com/slipset/deps-deploy"
+                                                                :sha     "287243b7ccd11b908790925d614429383bafb78e"}}}}}
