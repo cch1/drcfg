@@ -1,23 +1,24 @@
-{:deps    {org.clojure/clojure            {:mvn/version "1.10.1"}
-           org.clojure/tools.logging      {:mvn/version "1.1.0"}
-           org.clojure/core.async         {:mvn/version "1.3.610"}
+{:deps    {org.clojure/clojure            {:mvn/version "1.11.1"}
+           org.clojure/tools.logging      {:mvn/version "1.2.4"}
+           org.clojure/core.async         {:mvn/version "1.5.648"}
            org.clojure/tools.macro        {:mvn/version "0.1.5"}
            com.cognitect/anomalies        {:mvn/version "0.1.12"}
-           org.apache.zookeeper/zookeeper {:mvn/version "3.6.2" :exclusions [org.slf4j/slf4j-log4j12 log4j/log4j]}}
+           org.apache.zookeeper/zookeeper {:mvn/version "3.8.0"}}
  :paths   ["src" "resources"]
  :aliases {:dev             {:extra-paths ["dev-resources"]
-                             :extra-deps  {org.slf4j/slf4j-api      {:mvn/version "1.7.30"}
-                                           org.slf4j/jcl-over-slf4j {:mvn/version "1.7.30"}
-                                           org.slf4j/slf4j-log4j12  {:mvn/version "1.7.30"}
+                             :extra-deps  {org.slf4j/slf4j-api      {:mvn/version "1.7.36"}
+                                           org.slf4j/jcl-over-slf4j {:mvn/version "1.7.36"}
+                                           org.slf4j/slf4j-log4j12  {:mvn/version "1.7.36"}
                                            log4j/log4j              {:mvn/version "1.2.17"}}
                              :jvm-opts    ["-Djava.io.tmpdir=./tmp"
                                            "-Dclojure.core.async.go-checking=true"
                                            "-Dclojure.tools.logging.factory=clojure.tools.logging.impl/slf4j-factory"]}
            :test            {:extra-paths ["test" "test-resources"]
-                             :extra-deps  {org.apache.curator/curator-test {:mvn/version "5.1.0"}
-                                           zookeeper-clj/zookeeper-clj     {:mvn/version "0.9.4" :exclusions [org.apache.zookeeper/zookeeper]}
+                             :extra-deps  {org.apache.curator/curator-test {:mvn/version "5.2.1"}
+                                           zookeeper-clj/zookeeper-clj     {:mvn/version "0.10.0" :exclusions [org.apache.zookeeper/zookeeper]}
                                            metosin/testit                  {:mvn/version "0.4.1"}}}
-           :test-runner     {:extra-deps {com.cognitect/test-runner {:git/url "https://github.com/cognitect-labs/test-runner.git"
+           :test-runner     {:extra-paths ["test-resources"]
+                             :extra-deps {com.cognitect/test-runner {:git/url "https://github.com/cognitect-labs/test-runner.git"
                                                                      :git/sha "a85b3b02765fb68684ab9ee4a8598eacf7e471d2"}}
                              :main-opts  ["-m" "cognitect.test-runner"]
                              :exec-fn    cognitect.test-runner.api/test}
@@ -47,7 +48,7 @@
            :project/install {:exec-fn      deps-deploy.deps-deploy/deploy
                              :exec-args    {:installer :local :artifact "target/drcfg.jar" :pom-file "pom.xml" :sign-releases? false}
                              :replace-deps {slipset/deps-deploy {:git/url "https://github.com/slipset/deps-deploy"
-                                                                 :sha     "287243b7ccd11b908790925d614429383bafb78e"}}}
+                                                                 :sha     "b87c9299761762984bd54a285ca8fa0aac81809f"}}}
 
            ;; Next, push code (and tags) to github to ensure they are available when cljdocs goes to find articles.
            ;; And then, only after the tagged commit is on GitHub:
@@ -55,4 +56,4 @@
            :project/deploy {:exec-fn      deps-deploy.deps-deploy/deploy
                             :exec-args    {:installer :remote :artifact "target/drcfg.jar" :pom-file "pom.xml" :sign-releases? false}
                             :replace-deps {slipset/deps-deploy {:git/url "https://github.com/slipset/deps-deploy"
-                                                                :sha     "287243b7ccd11b908790925d614429383bafb78e"}}}}}
+                                                                :sha     "b87c9299761762984bd54a285ca8fa0aac81809f"}}}}}
