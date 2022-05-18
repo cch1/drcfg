@@ -6,22 +6,19 @@
            org.apache.zookeeper/zookeeper {:mvn/version "3.8.0"}}
  :paths   ["src" "resources"]
  :aliases {:dev             {:extra-paths ["dev-resources"]
-                             :extra-deps  {org.slf4j/slf4j-api      {:mvn/version "1.7.36"}
-                                           org.slf4j/jcl-over-slf4j {:mvn/version "1.7.36"}
-                                           org.slf4j/slf4j-log4j12  {:mvn/version "1.7.36"}
-                                           log4j/log4j              {:mvn/version "1.2.17"}}
+                             :extra-deps  {ch.qos.logback/logback-classic {:mvn/version "1.2.11"}}
                              :jvm-opts    ["-Djava.io.tmpdir=./tmp"
-                                           "-Dclojure.core.async.go-checking=true"
-                                           "-Dclojure.tools.logging.factory=clojure.tools.logging.impl/slf4j-factory"]}
+                                           "-Dclojure.core.async.go-checking=true"]}
            :test            {:extra-paths ["test" "test-resources"]
-                             :extra-deps  {org.apache.curator/curator-test {:mvn/version "5.2.1"}
+                             :extra-deps  {ch.qos.logback/logback-classic  {:mvn/version "1.2.11"}
+                                           org.apache.curator/curator-test {:mvn/version "5.2.1"}
                                            zookeeper-clj/zookeeper-clj     {:mvn/version "0.10.0" :exclusions [org.apache.zookeeper/zookeeper]}
                                            metosin/testit                  {:mvn/version "0.4.1"}}}
            :test-runner     {:extra-paths ["test-resources"]
-                             :extra-deps {com.cognitect/test-runner {:git/url "https://github.com/cognitect-labs/test-runner.git"
-                                                                     :git/sha "a85b3b02765fb68684ab9ee4a8598eacf7e471d2"}}
-                             :main-opts  ["-m" "cognitect.test-runner"]
-                             :exec-fn    cognitect.test-runner.api/test}
+                             :extra-deps  {com.cognitect/test-runner {:git/url "https://github.com/cognitect-labs/test-runner.git"
+                                                                      :git/sha "a85b3b02765fb68684ab9ee4a8598eacf7e471d2"}}
+                             :main-opts   ["-m" "cognitect.test-runner"]
+                             :exec-fn     cognitect.test-runner.api/test}
            ;; --------------------------- Build/Deploy Tasks ----------------------------
            ;; Generate a basic `pom.xml` file:
            ;; $ clojure -X:deps mvn-pom
