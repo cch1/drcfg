@@ -10,7 +10,7 @@
 (defchecker bytes-of [expected]
   (checker [actual] (= (seq actual) (seq (.getBytes expected)))))
 
-(defn- streams
+(defn streams
   "Captures the first `n` streamed elements of c subject to a timeout of `timeout` ms"
   ;; Now returns partial results!
   [n timeout c]
@@ -56,6 +56,37 @@
 (defchecker eventually-streams [n timeout expected]
   ;; The key to chatty checkers is to have the useful intermediate results be the evaluation of arguments to top-level expressions!
   (chatty-checker [actual] (extended-= (streams n timeout actual) expected)))
+
+(defn- check-map
+  [expected]
+  (fn [actual] (reduce-kv (fn [acc k v] (when acc (if (fn? v)
+                                                    (v (k actual))
+                                                    (= v (k actual)))))
+                          true
+                          expected)))
+
+(defn with-metadata?
+  [expected]
+  (fn [v] (and (if (fn? expected) (expected v) (= expected v))
+               ((check-map (meta expected)) (meta v)))))
+
+(let [base {:version int?
+            :cversion int?
+            :aversion int?
+            :ctime (partial instance? java.time.Instant)
+            :mtime (partial instance? java.time.Instant)
+            :mzxid pos-int?
+            :czxid pos-int?
+            :pzxid pos-int?
+            :numChildren int?
+            :ephemeralOwner int?
+            :dataLength int?}]
+  (defn *stat?
+    ([] (*stat? {}))
+    ([extra] (fn [actual] (and ((check-map extra) actual)
+                               ((check-map base) actual))))))
+
+(def initial-stat? {:version -1 :aversion -1 :cversion -1})
 
 (defchecker stat? [expected]
   ;; The key to chatty checkers is to have the useful intermediate results be the evaluation of arguments to top-level expressions!
