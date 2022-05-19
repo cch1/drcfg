@@ -10,42 +10,37 @@
 
 (def ^:dynamic *root* (znode/new-root))
 
-(def zk-prefix "drcfg")
+(let [default-prefix "/drcfg"]
+  (defn db-initialize!
+    "Synchronously initialize a fresh drcfg database in `prefix` at the ZooKeeper cluster identified by `connect-string`"
+    [connect-string & {:keys [prefix timeout] :or {prefix default-prefix timeout 8000} :as options}]
+    (let [drcfg-root (znode/new-root prefix)
+          root drcfg-root
+          data (async/pipe root
+                           (async/chan 1 (comp (map ::znode/type)
+                                               (filter #{::znode/exists ::znode/created!})))
+                           false)]
+      (let [^java.lang.AutoCloseable chandle (znode/open drcfg-root connect-string :timeout timeout)]
+        (assert (deref chandle timeout false) "Client failed to establish a connection")
+        (try
+          (when (async/alt!! (async/go
+                               (async/alt! data ([event] (do (case event
+                                                               ::znode/created! (log/infof "Database initialized")
+                                                               ::znode/exists (log/infof "Database already initialized")))))) true
+                             (async/timeout (* 2 timeout)) ([_] (log/warnf "Timed out waiting for database initialization") false))
+            (log/infof "Database ready at %s [%s]" connect-string (str root))
+            root)
+          (finally
+            (.close chandle)
+            (assert (not (deref chandle timeout true)) "Client failed to close"))))))
 
-(defn open
-  "Open a connection with `root` in `scope` to the ZooKeeper cluster defined by `hosts`"
-  ([hosts] (open hosts *root*))
-  ([hosts root] (open hosts root nil))
-  ([hosts root scope] (open hosts root scope 8000))
-  ([hosts root scope timeout]
-   (let [connect-string (string/join "/" (filter identity [hosts zk-prefix scope]))]
-     (log/infof "Opening client [%s] connection to %s" root connect-string)
-     (znode/open root connect-string :timeout timeout))))
-
-(defn db-initialize!
-  "Synchronously initialize a fresh drcfg database in `scope` at the ZooKeeper cluster identified by `connect-string`"
-  ([connect-string] (db-initialize! connect-string nil))
-  ([connect-string scope] (db-initialize! connect-string scope 8000))
-  ([connect-string scope timeout]
-   (let [drcfg-root (znode/new-root (str "/" zk-prefix))
-         root (if scope (znode/add-descendant drcfg-root (str "/" scope) ::scoped-root) drcfg-root)
-         data (async/pipe root
-                          (async/chan 1 (comp (map ::znode/type)
-                                              (filter #{::znode/exists ::znode/created!})))
-                          false)]
-     (let [^java.lang.AutoCloseable chandle (znode/open drcfg-root connect-string :timeout timeout)]
-       (assert (deref chandle timeout false) "Client failed to establish a connection")
-       (try
-         (when (async/alt!! (async/go
-                              (async/alt! data ([event] (do (case event
-                                                              ::znode/created! (log/infof "Database initialized")
-                                                              ::znode/exists (log/infof "Database already initialized")))))) true
-                            (async/timeout (* 2 timeout)) ([_] (log/warnf "Timed out waiting for database initialization") false))
-           (log/infof "Database ready at %s [%s]" connect-string (str root))
-           root)
-         (finally
-           (.close chandle)
-           (assert (not (deref chandle timeout true)) "Client failed to close")))))))
+  (defn open
+    "Open a connection with `root` bound to the node at `prefix` in the ZooKeeper cluster defined by `connect-string`"
+    ([connect-string] (open connect-string *root*))
+    ([connect-string root & {:keys [prefix timeout] :or {prefix default-prefix timeout 8000} :as options}]
+     (let [connect-string (str connect-string prefix)]
+       (log/infof "Opening client [%s] connection to %s" root connect-string)
+       (znode/open root connect-string :timeout timeout)))))
 
 (defn ^zk.zref.ZRef >-
   "Create a config reference with the given name (must be fully specified,
