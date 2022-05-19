@@ -36,18 +36,17 @@
 (defn- stat-to-map
   ([^Stat stat]
    ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_timeInZk
-   (when stat
-     {:czxid (.getCzxid stat)
-      :mzxid (.getMzxid stat)
-      :pzxid (.getPzxid stat)
-      :ctime (Instant/ofEpochMilli (.getCtime stat))
-      :mtime (Instant/ofEpochMilli (.getMtime stat))
-      :version (.getVersion stat)
-      :cversion (.getCversion stat)
-      :aversion (.getAversion stat)
-      :ephemeralOwner (.getEphemeralOwner stat)
-      :dataLength (.getDataLength stat)
-      :numChildren (.getNumChildren stat)})))
+   {:czxid (.getCzxid stat)
+    :mzxid (.getMzxid stat)
+    :pzxid (.getPzxid stat)
+    :ctime (Instant/ofEpochMilli (.getCtime stat))
+    :mtime (Instant/ofEpochMilli (.getMtime stat))
+    :version (.getVersion stat)
+    :cversion (.getCversion stat)
+    :aversion (.getAversion stat)
+    :ephemeralOwner (.getEphemeralOwner stat)
+    :dataLength (.getDataLength stat)
+    :numChildren (.getNumChildren stat)}))
 
 (def ^:private default-stat {:version -1 :cversion -1 :aversion -1})
 
