@@ -200,7 +200,7 @@
   (connected? [this] (when-let [client ^ZooKeeper (deref @zap 0 nil)] (.isConnected (.getState client))))
 
   clojure.lang.IFn
-  (invoke [this f] (.invoke this f (fn [e] (log/warnf e "Failed.") (throw e))))
+  (invoke [this f] (.invoke this f (fn [e] (log/warnf "Failed: %s." (.getMessage e)) (throw e))))
   (invoke [this f handler] ; resiliently invoke `f` with a raw client, calling the handler on unrecoverable exceptions
     (loop [[backoff & backoffs] (take 12 (iterate #(int (* 2 %)) 2))]
       (if-let [[result] (try (if-let [client ^ZooKeeper (deref @zap 0 nil)]
