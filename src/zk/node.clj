@@ -148,7 +148,7 @@
   (watch [this pub]
     (log/tracef "Watching %s" (str this))
     (let [handle-channel-error (fn [e] (log/errorf e "Exception while processing channel event for %s" (str this)))
-          callback-reports (async/chan 8 (comp) handle-channel-error)
+          callback-reports (async/chan 4 (comp) handle-channel-error)
           sub (async/chan 8)
           sync (async/chan)]
 
@@ -169,12 +169,16 @@
       (async/go ; Establish the node
         (let [{:keys [rc stat] :as report} (async/<! (get-existence this (async/chan) {:tag ::exists}))
               awaiting (case (first (client/translate-return-code rc))
-                         :OK (do (async/>! callback-reports report)
-                                 (async/<! (async/into #{} (async/merge (mapv #(watch % pub) @cref)))) ; wait for children
-                                 (async/sub pub (.path this) sub true) ; connect to the firehose of events
-                                 (get-data this callback-reports {:tag ::sync-data})
-                                 (get-children this callback-reports {:tag ::sync-children})
-                                 #{::exists ::sync-data ::sync-children})
+                         :OK (let [stat (stat-to-map stat)]
+                               (async/>! callback-reports report)
+                               (async/<! (async/into #{} (async/merge (mapv #(watch % pub) @cref)))) ; wait for children
+                               (async/sub pub (.path this) sub true) ; connect to the firehose of events
+                               (cond-> #{::exists}
+                                 (-> stat :dataLength pos?) ((fn [awaits] (get-data this callback-reports {:tag ::sync-data})
+                                                               (conj awaits ::sync-data)))
+                                 (-> stat :numChildren pos?) ((fn [awaits]
+                                                                (get-children this callback-reports {:tag ::sync-children})
+                                                                (conj awaits ::sync-children)))))
                          :NONODE (let [{:keys [rc stat] :as report} (async/<! (create! this (async/chan) {}))]
                                    (case (first (client/translate-return-code rc))
                                      :OK (do (async/>! callback-reports report)
