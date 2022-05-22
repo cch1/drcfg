@@ -1,5 +1,9 @@
 (ns zk.client
   "A resilient and respawning Zookeeper client"
+  (:require [cognitect.anomalies :as anomalies]
+            [clojure.core.async :as async]
+            [clojure.core.async.impl.protocols :as impl]
+            [clojure.tools.logging :as log])
   (:import [org.apache.zookeeper ZooKeeper Watcher WatchedEvent data.Stat
             AsyncCallback$VoidCallback
             CreateMode ZooKeeper$States
@@ -20,11 +24,7 @@
             KeeperException$SessionExpiredException KeeperException$SessionMovedException KeeperException$SystemErrorException
             KeeperException$UnimplementedException KeeperException$UnknownSessionException]
            (java.nio.file Paths Path)
-           (java.time Instant OffsetDateTime))
-  (:require [cognitect.anomalies :as anomalies]
-            [clojure.core.async :as async]
-            [clojure.core.async.impl.protocols :as impl]
-            [clojure.tools.logging :as log]))
+           (java.time Instant OffsetDateTime)))
 
 (let [anomaly-categories {KeeperException$Code/OK nil
                           KeeperException$Code/APIERROR ::anomalies/incorrect
