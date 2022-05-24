@@ -3,7 +3,8 @@
   (:require [cognitect.anomalies :as anomalies]
             [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as impl]
-            [clojure.tools.logging :as log])
+            [clojure.tools.logging :as log]
+            [zk.ephemeral :as ephemeral])
   (:import [org.apache.zookeeper ZooKeeper Watcher WatchedEvent data.Stat
             AsyncCallback$VoidCallback
             CreateMode ZooKeeper$States
@@ -25,6 +26,8 @@
             KeeperException$UnimplementedException KeeperException$UnknownSessionException]
            (java.nio.file Paths Path)
            (java.time Instant OffsetDateTime)))
+
+;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html
 
 (let [anomaly-categories {KeeperException$Code/OK nil
                           KeeperException$Code/APIERROR ::anomalies/incorrect
@@ -79,170 +82,137 @@
   [e]
   (kex-info (.getCode e) (.getMessage e) {} e))
 
-(def watch-modes {{:persistent? true :recursive? false} AddWatchMode/PERSISTENT
-                  {:persistent? true :recursive? true} AddWatchMode/PERSISTENT_RECURSIVE})
-
-(defn- event-to-map
+(defn event-to-map
   [^WatchedEvent event]
   {:type (keyword (.name (.getType event))) :state (keyword (.name (.getState event))) :path (.getPath event)})
 
-(defn- synthesize-child-events
-  "A transducer to inject :NodeChildrenChanged events into the transducible."
-  [rf]
-  (fn synthesize-child-events
-    ([] (rf))
-    ([result] (rf result))
-    ([result {:keys [type path] :as input}]
-     (let [result (rf result input)]
-       (if (#{:NodeCreated :NodeDeleted} type)
-         (rf result {:type :NodeChildrenChanged :path (some-> (.getParent (Paths/get path (into-array String []))) str)})
-         result)))))
+(defn- new-zk
+  [connect-string timeout]
+  (let [client-events (async/chan 2 (map event-to-map))
+        client-watcher (reify Watcher
+                         (process [_ event] (when-not (async/put! client-events event)
+                                              (log/warnf "Failed to put event %s on closed client events channel" event))))]
+    [(ZooKeeper. ^String connect-string ^int timeout client-watcher) client-events]))
 
-(defn- prefix-kw [x prefix] (keyword (str (namespace x)) (str prefix (name x))))
+(defn- close
+  "Close the given `client` (whose events arrive on channel `cevents`) and monitor for proper shutdown."
+  [[client cevents]]
+  (async/thread (when-not (.close client 5000) (log/warnf "Unable to close client %s" (str client))))
+  (async/go-loop []
+    (when-let [{state :state :as event} (async/<! cevents)]
+      (log/infof "[%s] Received monitor event: %s" (.hashCode client) event)
+      (if (= state :Closed)
+        true
+        (recur)))))
 
-;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html
+(defprotocol Notifiable
+  (register [this] "Register to receive notifications from `this` on the returned channel.  Use the returned channel to deregister.")
+  (deregister [this ch] "Deregister from receiving notifications on `ch`"))
+
+(defn- connect*
+  "Open a resilient connection to the cluster at `connect-string` and return a channel-like command handle that can be closed to disconnect
+  the client."
+  [new-z zap session]
+  (let [command (async/chan)
+        result (async/go-loop [state ::initial [client cevents :as cpair] (new-z)]
+                 (let [[{state' :state :as event} _] (async/alts! [cevents command])]
+                   (if event
+                     (do (log/infof "[%s] Received primary event: %s " (.hashCode client) event)
+                         (log/infof "[%s] State transition: %15s -> %15s" (.hashCode client) (name state) (name state'))
+                         (let [cpair' (case state'
+                                        (:SyncConnected :ConnectedReadOnly) (do (deliver @zap client)
+                                                                                (when (#{:Expired ::initial} state) ; new session
+                                                                                  (async/>! session client))
+                                                                                cpair)
+                                        :Disconnected (do (when (realized? @zap) (reset! zap (promise)))
+                                                          cpair) ; be patient, the client might reconnect.
+                                        :Expired (do (when (realized? @zap) (reset! zap (promise)))
+                                                     (close cpair)
+                                                     (new-z))
+                                        ;; :Closed cpair ; Only the shutdown monitor should see this ... what happened?
+                                        (throw (Exception. (format "Unexpected event state received %s while in state %s." state' state))))]
+                           (recur state' cpair')))
+                     (do (when (realized? @zap) (reset! zap (promise)))
+                         (async/<! (close cpair))))))]
+    (reify ; a duplex stream a la manifold
+      java.lang.AutoCloseable
+      (close [this] (async/close! this) (async/<!! this)) ; synchronized with connect loop shutdown
+      impl/ReadPort
+      (take! [this handler] (impl/take! result handler))
+      impl/Channel
+      (close! [this] (async/close! command))
+      (closed? [this] (impl/closed? command)))))
+
 (defprotocol Connectable
-  (open [this connect-string options] "Open the connection to `connect-string` and stream client's events to `events`")
-  (connected? [this] "Is this client currently connected to the ZooKeeper cluster?"))
+  (connect [this connect-string options]))
 
-(deftype ZClient [zap]
+(deftype ZClient [zap m-session]
   Connectable
-  (open [this connect-string {:keys [timeout recursive? can-be-read-only? path]
-                              :or {timeout 2000 can-be-read-only? true recursive? true path "/"}}]
-    (assert (not (deref @zap 0 true)) "Must close current connection before opening a new connection!") ; There is a bit of a race condition here...
-    (reset! zap (promise))
-    (let [watch-mode (watch-modes {:persistent? true :recursive? (boolean recursive?)})
-          client-events (async/chan 8 (map event-to-map))
-          node-events (async/chan (async/sliding-buffer 8) (comp (map event-to-map) (map #(dissoc % :state)) (filter :path) synthesize-child-events))
-          watch-tracker (async/chan 2)
-          client-watcher (reify Watcher
-                           (process [_ event] (when-not (async/put! client-events event)
-                                                (log/warnf "Failed to put event %s on closed client events channel" event))))
-          node-watcher (reify Watcher
-                         (process [_ event] (when-not (async/put! node-events event)
-                                              (log/warnf "Failed to put event %s on closed node events channel" event))))
-          watch-node (fn watch-node [z [backoff & backoffs]]
-                       (let [cb (reify AsyncCallback$VoidCallback
-                                  (processResult [this rc path ctx]
-                                    (if (zero? rc)
-                                      (async/put! watch-tracker ::watch-added)
-                                      (let [[kcode retry? category] (translate-return-code rc)
-                                            state (.getState z)]
-                                        (if (and backoff retry? (not (#{ZooKeeper$States/CLOSED} state)))
-                                          (do (log/infof "Unable to add watch [%s/%s: %s], backing off %d" kcode state (name category) backoff)
-                                              (Thread/sleep backoff)
-                                              (watch-node z backoffs)) ; being careful with the stack.
-                                          (do (log/warnf "Failed to add watch [%s : %s]." kcode (name category))
-                                              (async/put! watch-tracker ::failed-to-watch)))))))]
-                         (.addWatch z path node-watcher watch-mode cb nil)))
-          new-client (fn [] (ZooKeeper. ^String connect-string ^int timeout client-watcher can-be-read-only?))
-          command (async/chan 2)
-          result (async/go-loop [state ::init client nil]
-                   (if-let [e (async/alt! client-events ([e] (:state e))
-                                          watch-tracker ([e] e)
-                                          command ([c] (if c c ::close!))
-                                          :priority true)]
-                     (do (log/tracef "Received command event %15s [%12s]" (name e) (name state))
-                         (let [[state' client] (case [state e] ; TODO: clojure.core.match?
-                                                 [::init ::open!] [::connecting (new-client)]
-                                                 ([::connecting :SyncConnected] [::connecting :ConnectedReadOnly])
-                                                 , (do (watch-node client (take 16 (iterate #(int (* 2 %)) 1))) [::connected client])
-                                                 [::connecting ::watch-added] [::connecting client] ; rare: :Expire immediately after connected->add-watch
-                                                 ([::connected :Disconnected]) [::reconnecting client]
-                                                 ([::connected :Expired] [::watching :Expired])
-                                                 , (do (reset! zap (promise)) [::connecting (new-client)]) ; testing only?
-                                                 [::connected ::watch-added]
-                                                 , (do (deliver @zap client) [::watching client]) ; the ideal steady-state
-                                                 [::watching :Disconnected] [::reconnecting client]
-                                                 ([::reconnecting :SyncConnected] [::reconnecting :ConnectedReadOnly])
-                                                 , [::watching client] ; watches survive
-                                                 [::reconnecting :Expired] (do (reset! zap (promise)) [::connecting (new-client)])
-                                                 ([::connecting ::close!] [::connected ::close!] [::watching ::close!] [::reconnecting ::close!])
-                                                 , (do (reset! zap (promise))
-                                                       (if (async/<! (async/thread (.close ^ZooKeeper client timeout)))
-                                                         [::closing client]
-                                                         [(prefix-kw state "closed-") client]))
-                                                 ([::closing :SyncConnected] [::closing :ConnectedReadOnly] [::closing :Disconnected])
-                                                 , [::closing client] ;; be patient
-                                                 [::closing ::close!] [::closing client] ;; be patient... there can be a lot of these.
-                                                 [::closing :Expired] [::expired-closing client] ; this is a terminal state
-                                                 [::closing :Closed] [::closed client] ; The ideal final state (clean shutdown).
-                                                 (throw (Exception. (format "Unexpected event %s while in state %s." e state))))]
-                           (log/debugf "Event received: %14s [%12s -> %-14s]" (name e) (name state) (name state'))
-                           (if (#{::closed ::failed-to-watch ::closed-connecting ::closed-connected ::closed-reconnecting ::expired-closing} state')
-                             (do (when (#{::closed-connecting ::closed-connected ::closed-reconnecting} state')
-                                   (log/warnf "%s did not shut down cleanly: %s" this state'))
-                                 (async/close! node-events)
-                                 (async/close! client-events)
-                                 (deliver @zap nil)
-                                 state')
-                             (recur state' client))))
-                     ::closed-unexpectedly))]
-      (async/>!! command ::open!)
-      (log/debugf "Event processing opened for %s" (str this))
-      (reify
-        java.lang.AutoCloseable
-        (close [this]
-          (async/close! command)
-          (log/spyf :debug "Closed with %s." (async/<!! result))
-          (.close! this))
-        clojure.lang.IDeref
-        (deref [this] (deref @zap))
-        clojure.lang.IBlockingDeref
-        (deref [this timeout timeout-value] (deref @zap timeout timeout-value))
-        clojure.lang.IPending
-        (isRealized [this] (realized? @zap))
-        impl/ReadPort
-        (take! [this handler] (impl/take! node-events handler))
-        impl/Channel
-        (closed? [this] (impl/closed? node-events))
-        (close! [this] (async/close! command) (impl/close! node-events)))))
-  (connected? [this] (when-let [client ^ZooKeeper (deref @zap 0 nil)] (.isConnected (.getState client))))
-
+  (connect [this connect-string options]
+    (let [{timeout :timeout :or {timeout 30000}} options
+          new-zk (partial new-zk connect-string timeout)]
+      (connect* new-zk zap (async/muxch* m-session))))
+  Notifiable ; manage notifications for session establishment
+  (register [this] (let [wch (async/chan 1 (dedupe))] ; FIXME: need generational guarantee -dedupe is not strictly adequate & distinct is expensive.
+                     (async/tap m-session wch)
+                     (async/thread (when-let [z (deref @zap)] (async/put! wch z))) ; maybe bootstrap the watcher
+                     wch))
+  (deregister [this wch] (async/untap m-session wch))
+  clojure.lang.IDeref
+  (deref [this] (deref @zap))
+  clojure.lang.IBlockingDeref
+  (deref [this timeout timeout-value] (deref @zap timeout timeout-value))
+  clojure.lang.IPending
+  (isRealized [this] (realized? @zap))
   clojure.lang.IFn
-  (invoke [this f] (.invoke this f (fn [e] (log/warnf "Failed: %s." (.getMessage e)) (throw e))))
-  (invoke [this f handler] ; resiliently invoke `f` with a raw client, calling the handler on unrecoverable exceptions
-    (loop [[backoff & backoffs] (take 12 (iterate #(int (* 2 %)) 2))]
-      (if-let [[result] (try (if-let [client ^ZooKeeper (deref @zap 0 nil)]
-                               [(f client)]
-                               (throw (ex-info (format "No raw client available to process ZooKeeper request." this)
-                                               {::anomalies/category ::anomalies/unavailable})))
-                             (catch clojure.lang.ExceptionInfo ex
-                               (when-not backoff [(handler ex)]))
-                             (catch KeeperException e
-                               (let [[ex retry?] (translate-exception e)]
-                                 (when-not (and retry? backoff) [(handler ex)]))))]
-        result
-        (do
-          (log/debugf "Backing off %dms to try again" backoff)
-          (Thread/sleep backoff)
-          (recur backoffs)))))
-
+  (invoke [this f] (.invoke this f (fn [e] (throw e))))
+  (invoke [this f handler]
+    (loop [i 5]
+      (let [result (try (f @@zap) ; block waiting
+                        (catch KeeperException e
+                          (let [[ex retry?] (translate-exception e)]
+                            (when-not (and retry? (pos? i)) [(handler ex)]))))])))
   (applyTo [this args]
     (let [n (clojure.lang.RT/boundedLength args 1)]
       (case n
-        2 (.invoke this (first args) (second args))
-        (throw (clojure.lang.ArityException. n (.. this (getClass) (getSimpleName)))))))
-
+        2 (.invoke this (first args) (second args)))))
   java.lang.Object
   (toString [this] (format "ℤℂ: %s"
-                           (if-let [client (deref @zap 0 nil)]
-                             (let [server (last (re-find #"remoteserver:(\S+)" (.toString ^ZooKeeper client)))]
-                               (format "@%04x 0x%08x (%s)"
-                                       (System/identityHashCode client)
-                                       (bit-and 0x00000000FFFFFFFF (.getSessionId client)) ; just the LSBs please
-                                       (.getState client)))
+                           (if-let [z (deref @zap 0 nil)]
+                             (format "@%04x 0x%08x (%s)"
+                                     (System/identityHashCode z)
+                                     (bit-and 0x00000000FFFFFFFF (.getSessionId z)) ; just the LSBs please
+                                     (.getState z))
                              "<No Raw Client>"))))
 
-(defn create ^zk.client.ZClient [] (let [zap (atom (promise))] (deliver @zap nil) (->ZClient zap)))
+(defn create
+  []
+  (->ZClient (atom (promise)) (async/mult (async/chan))))
 
-(defmacro while-watching
-  "Evaluate the body after the watch has started, binding `chandle` to a channel that streams observed node events"
-  [[chandle open-expression] & body]
-  `(let [~chandle ~open-expression]
-     (assert (deref ~chandle) "No connection established") ; TODO: support a timeout
-     (try
-       ~@body
-       (finally
-         (. ~chandle close)
-         (assert (not (deref ~chandle)) "Unrecognized close state"))))) ; TODO: apply the same timeout here?
+(defn open
+  [client connect-string & options]
+  (connect client connect-string options))
+
+(defn call
+  [zap f]
+  (if-let [z (@@zap)]
+    (loop [i 5]
+      (let [result (try (f z)
+                        (catch KeeperException$ConnectionLossException e ::connection-loss))]
+        (if (= ::connection-loss result)
+          (if (pos? i)
+            (recur (dec i))
+            (throw (ex-info "Exceeded connection loss retry threshold" {:zap zap})))
+          result)))
+    (throw (ex-info "The zap is nil -client has closed!" {:zap zap}))))
+
+(defmacro while->open
+  "Creates a client binding to the `name` symbol and threads it (per `->`) into
+  the given `open-expression`.  Ensures the client is actually connected before
+  executing `body` and synchronously ensures the client is properly closed
+  before exiting."
+  [[name open-expression] & body]
+  `(let [~name (create)]
+     (with-open [client# (~(first open-expression) ~name ~@(rest open-expression))]
+       (async/<!! (register ~name))
+       ~@body)))

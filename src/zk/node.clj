@@ -7,13 +7,14 @@
             [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as impl]
             [clojure.tools.logging :as log])
-  (:import [org.apache.zookeeper ZooKeeper Watcher WatchedEvent data.Stat
+  (:import [org.apache.zookeeper AddWatchMode KeeperException Watcher WatchedEvent ZooKeeper
             AsyncCallback$Create2Callback AsyncCallback$StatCallback AsyncCallback$VoidCallback
             AsyncCallback$DataCallback AsyncCallback$Children2Callback
             CreateMode ZooKeeper$States
             Watcher$Event$EventType Watcher$Event$KeeperState
             ZooDefs$Ids
-            KeeperException$Code]
+            KeeperException$Code
+            data.Stat]
            (java.nio.file Paths Path)
            (java.time Instant)))
 
@@ -23,6 +24,9 @@
            :creator-all-acl ZooDefs$Ids/CREATOR_ALL_ACL ; This ACL gives the creators authentication id's all permissions
            :read-all-acl ZooDefs$Ids/READ_ACL_UNSAFE ; This ACL gives the world the ability to read
            })
+
+(def watch-modes {{:persistent? true :recursive? false} AddWatchMode/PERSISTENT
+                  {:persistent? true :recursive? true} AddWatchMode/PERSISTENT_RECURSIVE})
 
 (def create-modes {;; The znode will not be automatically deleted upon client disconnect
                    {:persistent? true, :sequential? false} CreateMode/PERSISTENT
@@ -92,6 +96,47 @@
   (reify AsyncCallback$Children2Callback
     (processResult [this rc path ctx children stat]
       (async/put! c {:type ::children :tag tag :rc rc :children children :stat stat}))))
+
+(defn- synthesize-child-events
+  "A transducer to inject :NodeChildrenChanged events into the transducible."
+  [rf]
+  (fn synthesize-child-events
+    ([] (rf))
+    ([result] (rf result))
+    ([result {:keys [type path] :as input}]
+     (let [result (rf result input)]
+       (if (#{:NodeCreated :NodeDeleted} type)
+         (rf result {:type :NodeChildrenChanged :path (some-> (.getParent (Paths/get path (into-array String []))) str)})
+         result)))))
+
+(defn watch-nodes
+  "Start a resilient recursive watch of the node at the given `path` using the
+  given `zclient`.  Returns a channel that will receive observed node events.
+  The watch can be stopped by closing the zclient."
+  [zclient path]
+  (let [command (async/chan)
+        channel (async/chan (async/sliding-buffer 4) (comp (map client/event-to-map) (map #(dissoc % :state)) (filter :path) synthesize-child-events))
+        watch-mode (watch-modes {:persistent? true :recursive? true})
+        node-watcher (reify Watcher
+	               (process [_ event] (when-not (async/put! channel event)
+				            (log/warnf "Failed to put event %s on closed node events channel" event))))
+        session-watch (client/register zclient)]
+    (async/go-loop []
+      (let [[z _] (async/alts! [session-watch command])]
+        (if z
+          (do (async/thread (try (.addWatch z path node-watcher watch-mode)
+                                 (log/infof "[%s] [%d] Watch added for %s" (.hashCode z) (.getSessionId z) path)
+                                 (catch KeeperException kex
+                                   (log/error "Failed to set watch on %s: %s!" path (client/translate-exception kex)))))
+              (recur))
+          (do (log/infof "Stopping node watch session loop")
+              (client/deregister zclient session-watch)))))
+    (reify
+      impl/ReadPort
+      (take! [this handler] (impl/take! channel handler))
+      impl/Channel
+      (close! [this] (async/close! command))
+      (closed? [this] (impl/closed? command)))))
 
 (defn- delta
   "Compute the +/- deltas (sets) of the two provided sets"
@@ -190,7 +235,7 @@
           (async/go-loop [watched @cref awaiting awaiting]
             (when-let [{:keys [type tag rc stat name data children] :as report} (async/<! callback-reports)]
               (let [result (first (client/translate-return-code rc))]
-                (log/logf (if (= :OK result) :debug :warn) "%-18s Callback report: %16s %-11s" this (clojure.core/name tag) result)
+                (log/logf (if (= :OK result) :info :warn) "%-18s Callback report: %16s %-11s" this (clojure.core/name tag) result)
                 (when (= :OK result)
                   (let [stat (when stat (stat-to-map stat))
                         awaiting' (disj awaiting tag)
@@ -321,10 +366,10 @@
   "Create a root znode"
   ([] (new-root "/"))
   ([path] (new-root path ::root))
-  ([path value] (new-root path value (client/create)))
-  ([path value client] (let [events (async/chan (async/sliding-buffer 8))
-                             p (Paths/get path (into-array String []))]
-                         (->ZNode client p (ref value) (ref #{}) (ref default-stat) events))))
+  ([path value] (let [client (client/create)
+                      events (async/chan (async/sliding-buffer 8))
+                      p (Paths/get path (into-array String []))]
+                  (->ZNode client p (ref value) (ref #{}) (ref default-stat) events))))
 
 (defn ^zk.node.ZNode add-descendant
   "Add a descendant ZNode to the given parent's (sub)tree `root` ZNode at the given (relative) `path` carrying the given `value`
@@ -338,10 +383,32 @@
 
 (defn open
   "Open a resilient ZooKeeper client connection and watch for events on `root` and its descendants"
-  [^zk.node.ZNode root cstring & args]
-  (let [chandle (client/open (.client root) cstring args)]
-    (async/<!! (watch root (async/pub chandle :path)))
-    chandle))
+  [^zk.node.ZNode root cstring & {:keys [timeout] :or {timeout 8000} :as options}]
+  ;; TODO: make this a method on the ZNode?  Maybe part of watch?
+  (let [client (.client root)
+        chandle (client/connect client cstring options)
+        watch-chandle (watch-nodes client (path root))
+        pub (async/pub watch-chandle :path)]
+    (if (async/alt!! (watch root pub) true
+                     (async/timeout timeout) false)
+      (reify ; a duplex stream a la manifold
+        java.lang.AutoCloseable
+        (close [this] (async/close! this) (async/<!! this)) ; synchronized with connect loop shutdown
+        impl/ReadPort
+        (take! [this handler] (impl/take! chandle handler))
+        impl/Channel
+        (close! [this]
+          (async/close! chandle)
+          (async/close! watch-chandle))
+        (closed? [this] (impl/closed? chandle)))
+      (throw (ex-info "Timed out waiting for root to synchronize with cluster" {:connect-string cstring :timeout timeout})))))
+
+(defmacro while-watching
+  [root connect-string & body]
+  `(let [client# (.client ~root)]
+     (with-open [client-chandle# (client/connect client# ~connect-string)
+                 watch-chandle# (watch-nodes client# (path ~root))]
+       ~@body)))
 
 ;; https://stackoverflow.com/questions/49373252/custom-pprint-for-defrecord-in-nested-structure
 ;; https://stackoverflow.com/questions/15179515/pretty-printing-a-record-using-a-custom-method-in-clojure

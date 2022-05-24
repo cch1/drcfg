@@ -18,7 +18,8 @@
                              :extra-deps  {com.cognitect/test-runner {:git/url "https://github.com/cognitect-labs/test-runner.git"
                                                                       :git/sha "a85b3b02765fb68684ab9ee4a8598eacf7e471d2"}}
                              :main-opts   ["-m" "cognitect.test-runner"]
-                             :exec-fn     cognitect.test-runner.api/test}
+                             :exec-fn     cognitect.test-runner.api/test
+                             :exec-args {:excludes [:testing-cluster]}}
            ;; --------------------------- Build/Deploy Tasks ----------------------------
            ;; Generate a basic `pom.xml` file:
            ;; $ clojure -X:deps mvn-pom

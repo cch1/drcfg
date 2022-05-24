@@ -18,7 +18,10 @@
 
 (defn ref-state
   [actual]
-  (dosync [(deref (.sref actual)) (deref (.vref actual)) (deref (.cref actual))]))
+  (dosync
+   [(deref (.sref actual))
+    (deref (.vref actual))
+    (deref (.cref actual))]))
 
 (defn named-nodes? [names]
   (fn [actual]
@@ -299,12 +302,11 @@
       (facts (ref-state (root "/my-node")) =in=> [(*stat? {:dataLength 0}) ::znode/placeholder #{}]))))
 
 (deftest start-stop
-  (let [bad-connect-string "127.1.1.1:9999"
-        $z (new-root)
-        results (for [connect-string (concat (repeat 5 *connect-string*)
-                                             (repeat 5 bad-connect-string)
-                                             (repeatedly 5 #(rand-nth [*connect-string* bad-connect-string])))]
-                  (let [handle (open $z (str connect-string "/drcfg") :timeout 1000)]
-                    (Thread/sleep (rand-int 100))
-                    (.close handle)))]
-    (is (= (repeat 15 nil) results))))
+  (let [$z (new-root)]
+    (is (= (repeat 5 true) (for [connect-string (repeat 5 *connect-string*)]
+                             (with-open [handle (open $z (str connect-string "/drcfg") :timeout 1000)]
+                               true))))))
+
+(deftest throws-on-sync-timeout
+  (let [$z (new-root)]
+    (is (thrown? clojure.lang.ExceptionInfo (open $z "127.1.1.1:9999" :timeout 1000)))))
