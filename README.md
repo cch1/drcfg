@@ -6,7 +6,7 @@ of [Apache Zookeeper](http://zookeeper.apache.org/).  ZNodes are a lighter-weigh
 an entire ZooKeeper (sub-)tree.
 
 ## Repository Owner
-[Chris Hapgood](mailto:cch1@hapgoods.com)
+[Chris Hapgood](mailto:cch1@hapgood.com)
 
 ## License
 
@@ -29,11 +29,9 @@ on the ZRef and ZNode.
 
 ### About the drcfg zookeeper node namespace
 
-When using the `def>` macro, drcfg stores values in ZooKeeper at the path `/drcfg/<ClojureNamespaceParent>/.../<ClojureNamespaceChild>/<ClojureVarName>` where the namespace components are derived from the dot-separated namespace hierarchy of the module invoking the macro.
+When using the `def>` macro, drcfg stores values in ZooKeeper at the path `/drcfg/<ClojureNamespaceParent>/.../<ClojureNamespaceChild>/<ClojureVarName>` where the namespace components are derived from the dot-separated namespace hierarchy of the *ns* value when invoking the macro.
 
-When using the deprecated `def>-` macro, drcfg stores values in zookeeper at the path `/drcfg/<*ns*>/<varname>` where `*ns*` is the namespace of the module that defines the var.
-
-When using the `def>-` or `def>` macros, drcfg will also create a `.metadata` zookeeper node under the defined node containing any var metadata (hopefully including a doc string as described below).  If no metadata is provided, the node is not created.  Note that normal metadata on the reference object contains the ZooKeeper Stat data structure.
+When using the `def>` macro drcfg will also create a `.metadata` zookeeper node under the defined node containing any var metadata (hopefully including a doc string as described below).  If no metadata is provided, the node is not created.  Note that normal metadata on the reference object contains the ZooKeeper Stat data structure.
 
 ### drcfg usage
 
@@ -86,7 +84,7 @@ When the application shuts down, you should release resources associated with th
 
 	(.close handle)
 
-Note that the opening and closing of the ZClient can be neatly managed by state management tools like Clojure's `with-open` or through complete systems like [component](https://github.com/stuartsierra/component).
+Note that the opening and closing of the ZClient can be neatly managed by state management tools like Clojure's `with-open` or through complete systems like [component](https://github.com/stuartsierra/component) or [integrant](https://github.com/weavejester/integrant).
 
 #### Writes
 ZRefs can be updated in the same fashion as Clojure's own atom.  Updates are written *synchronously* to the cluster.  See the section below on protocols for enhanced usage with versioning semantics.  **Keep in mind that reads will not reflect the current value until the watch on the ZooKeeper node has been fired and the client has received the update.**  This typically happens in milliseconds but is obviously dependent on your specific implementation of the ZooKeeper cluster.
@@ -100,7 +98,7 @@ The current version of drcfg depends directly on the [official java ZooKeeper li
 ### Global State
 The `def>` and `def>-` macros add a var to the current namespace.  If you prefer to create a local binding to a ZRef, you can use the `zk.drcfg/>-` function.
 
-In addition to creating the var, the `def>` and `def>-` macros, as well as the `>-` function add one (or, if metadata is specified, two) ZNode to the global tree of ZNodes (rooted at `drcfg/*root*`).  This state is required because `def>` and `def>-` are intended to be used in top-level forms in Clojure code, **and** because the connection to a ZooKeeper cluster is unlikely to be established at that time, it is important to track the ZNodes for eventual connection later in the application's startup.  If you prefer to manage a (non-global) hierarchy of ZNodes, the `zk.node` namespace provides all the necessary functionality.
+In addition to creating the var, the `def>` macro as well as the `>-` function add one (or, if metadata is specified, two) ZNode to the global tree of ZNodes (rooted at `drcfg/*root*`).  This state is required because `def>` are intended to be used in top-level forms in Clojure code, **and** because the connection to a ZooKeeper cluster is unlikely to be established at that time, it is important to track the ZNodes for eventual connection later in the application's startup.  If you prefer to manage a (non-global) hierarchy of ZNodes, the `zk.node` namespace provides all the necessary functionality.
 
 ### Monitoring/Admin
 http://zookeeper.apache.org/doc/r3.5.1-alpha/zookeeperAdmin.html#sc_zkCommands
@@ -195,40 +193,32 @@ In addition to the above standard clojure interfaces, ZNodes also support severa
 
 Zookeeper really, really wants your requests to zookeeper to get where
 they were going.  If you are a developer without a connection to zookeeper, this logging
-will quickly overwhelm any useful info in the output.
+will quickly overwhelm any useful info in the output.  Current versions of ZooKeeper use 
+logback for logging.  Here is a sample logback configuration that will help restore peace:
 
-These log4j.properties settings can help:
+``` xml
+<configuration>
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <!-- encoders are assigned the type
+         ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
+    <encoder>
+      <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+    </encoder>
+  </appender>
 
-    # settings to avoid incessant logging of missing connection when
-    # zookeeper is unavailable
-    log4j.logger.org.apache.zookeeper.ClientCnxn=ERROR
-    log4j.logger.org.apache.zookeeper.ZooKeeper=WARN
-    # additionally, avoid tons of DEBUG logging from zk
-    # when rootLogger is set to DEBUG
-    log4j.logger.org.apache.zookeeper.ClientCnxnSocketNIO=INFO
+  <logger name="org.apache.zookeeper" level="WARN"/>
+  <logger name="org.apache.zookeeper.ClientCnxn" level="ERROR"/>
+  <logger name="org.apache.zookeeper.server" level="WARN"/>
+  <logger name="org.apache.zookeeper.server.ServerCnxnFactory" level="ERROR"/>
+  <logger name="org.apache.zookeeper.server.NIOServerCnxn" level="ERROR"/>
+  <logger name="org.apache.curator" level="WARN"/>
 
-Alternatively, it can also be helpful to change the layout to use
-EnhancedPatternLayout and add `%throwable{n}` to the ConversionPattern
-to limit each logged stacktrace to n lines.
+  <root level="INFO">
+    <appender-ref ref="STDOUT" />
+  </root>
+</configuration>
 
-### Running a local zookeeper
-
-If you want to run a local instance of ZooKeeper, you can set it up as follows:
-
-``` bash
-wget http://mirror.symnds.com/software/Apache/zookeeper/zookeeper-3.4.5/zookeeper-3.4.5.tar.gz
-tar xvfz zookeeper-3.4.5.tar.gz
-cp zookeeper-3.4.5/conf/zoo_sample.cfg zookeeper-3.4.5/conf/zoo.cfg
-zookeeper-3.4.5/bin/zkServer.sh start
 ```
-
-drcfg should take care of any necessary bootstrapping of the root
-zookeeper node and will initialize referenced config nodes with their
-default values.
-
-Note that the sample config stores data in `/tmp/zookeeper`, which will
-get blown away on a reboot. If you want to retain this data, change
-zoo.cfg to point dataDir to a more persistent directory.
 
 ### History
 The drcfg library started as an internal project at Roomkey in early 2013.  It was broken out into a standalone library in mid-2013 and released as open-source after Roomkey ceased operating in 2020.  My colleagues at Roomkey were instrumental in producing drcfg.  My management was also supportive of the concept, its implementation and evolution.
@@ -236,6 +226,7 @@ The drcfg library started as an internal project at Roomkey in early 2013.  It w
 ### Contributors
 These are the people that have contributed to drcfg.  Without them drcfg would have more bugs, fewer features and scant documentation.
 
+* Chris Hapgood
 * Laverne Schrock
 * Adam Frey
 * David Sison
