@@ -32,7 +32,3 @@
 (deftest can-get-metadata-of-fresh-zref
   (let [$z (create (znode/new-root) "/myzref" "A")]
     (is (= -1 (:version (meta $z))))))
-
-(deftest disconnected-zrefs-cannot-be-updated
-  (let [$z (create (znode/new-root "/" ::znode/root (zclient/create)) "/myzref" "A")]
-    (is (thrown? RuntimeException (.compareVersionAndSet $z 0 "B")))))
