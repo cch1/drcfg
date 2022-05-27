@@ -78,7 +78,8 @@
   (let [$root (new-root)]
     (add-descendant $root "/child" 0)
     (add-descendant $root "/child/grandchild" 0)
-    (with-open [_ (open $root (str *connect-string* sandbox))]))
+    (with-open [chandle (open $root (str *connect-string* sandbox))]
+      (deref chandle)))
   (let [$root (new-root)]
     (with-open [_ (open $root (str *connect-string* sandbox))]
       (facts (streams 3 2000 $root) =in=> [#::znode{:type ::znode/exists :stat (*stat? {:version 0})}
@@ -258,11 +259,12 @@
   (let [$root (new-root)
         $child0 (add-descendant $root "/child0" 0)
         $child1 (add-descendant $root "/child1" 1)]
-    (with-open [_ (open $root (str *connect-string* sandbox))]))
+    (with-open [c (open $root (str *connect-string* sandbox))]
+      (deref c)))
   (let [$root (new-root)
         $child2 (add-descendant $root "/child2" 2)
         $child3 (add-descendant $root "/child3" 3)]
-    (with-open [_ (open $root (str *connect-string* sandbox))]
+    (with-open [c (open $root (str *connect-string* sandbox))]
       (facts (streams 3 2000 $root) =in=> [#::znode{:type ::znode/exists :stat (*stat? {})}
                                            #::znode{:type ::znode/sync-children :stat (*stat? {})
                                                     :inserted (named-nodes? #{"child0" "child1"}) :removed #{}}
@@ -290,23 +292,27 @@
         child1 (add-descendant root "/child1" (with-meta #{1 2 3} {:foo "bar"}))
         grandchild (add-descendant root "/child0/grandchild" 0)]
     (facts (walk root) =in=> ^:in-any-order [root child0 child1 grandchild]) ; walk the tree offline
-    (with-open [_ (open root (str *connect-string* sandbox))])  ; actualize the tree
+    (with-open [chandle (open root (str *connect-string* sandbox))] (deref chandle))  ; actualize the tree
     (let [root' (new-root)]
-      (with-open [_ (open root' (str *connect-string* sandbox))] ; walk the discovered tree
+      (with-open [chandle (open root' (str *connect-string* sandbox))] ; walk the discovered tree
+        (deref chandle)
         (facts (walk root' name) =in=> ^:in-any-order ["" "child0" "child1" "grandchild"])))))
 
 (deftest data-less-nodes-do-not-wreak-havoc
   (zoo/create *c* (str sandbox "/my-node"))
   (let [root (new-root)]
-    (with-open [_ (open root (str *connect-string* sandbox))]
+    (with-open [chandle (open root (str *connect-string* sandbox))]
+      (deref chandle)
       (facts (ref-state (root "/my-node")) =in=> [(*stat? {:dataLength 0}) ::znode/placeholder #{}]))))
 
 (deftest start-stop
   (let [$z (new-root)]
-    (is (= (repeat 5 true) (for [connect-string (repeat 5 *connect-string*)]
-                             (with-open [handle (open $z (str connect-string "/drcfg") :timeout 1000)]
-                               true))))))
+    (is (= (repeat 5 true) (repeatedly 5 #(with-open [chandle (open $z (str *connect-string* "/drcfg"))]
+                                            (deref chandle)))))))
 
 (deftest throws-on-sync-timeout
   (let [$z (new-root)]
-    (is (thrown? clojure.lang.ExceptionInfo (open $z "127.1.1.1:9999" :timeout 1000)))))
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (while-watching $z "127.1.1.1:9999"
+
+                                 true)))))

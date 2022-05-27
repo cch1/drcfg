@@ -47,12 +47,9 @@
 
 (defmacro with-awaited-connection
   [zroot connect-string & body]
-  `(let [chandle# (open ~connect-string ~zroot)]
+  `(with-open [chandle# (open ~connect-string ~zroot)]
      (assert (deref chandle# 8000 nil) "No connection established")
-     (try ~@body
-          (finally
-            (.close chandle#)
-            (assert (not (deref chandle#)) "Unrecognized close state")))))
+     ~@body))
 
 (use-fixtures :each (fn [f]
                       (with-open [server (TestingServer.)

@@ -20,19 +20,15 @@
                            (async/chan 1 (comp (map ::znode/type)
                                                (filter #{::znode/exists ::znode/created!})))
                            false)]
-      (let [^java.lang.AutoCloseable chandle (znode/open drcfg-root connect-string :timeout timeout)]
+      (with-open [^java.lang.AutoCloseable chandle (znode/open drcfg-root connect-string :timeout timeout)]
         (assert (deref chandle timeout false) "Client failed to establish a connection")
-        (try
-          (when (async/alt!! (async/go
-                               (async/alt! data ([event] (do (case event
-                                                               ::znode/created! (log/infof "Database initialized")
-                                                               ::znode/exists (log/infof "Database already initialized")))))) true
-                             (async/timeout (* 2 timeout)) ([_] (log/warnf "Timed out waiting for database initialization") false))
-            (log/infof "Database ready at %s [%s]" connect-string (str root))
-            root)
-          (finally
-            (.close chandle)
-            (assert (not (deref chandle timeout true)) "Client failed to close"))))))
+        (when (async/alt!! (async/go
+                             (async/alt! data ([event] (do (case event
+                                                             ::znode/created! (log/infof "Database initialized")
+                                                             ::znode/exists (log/infof "Database already initialized")))))) true
+                           (async/timeout (* 2 timeout)) ([_] (log/warnf "Timed out waiting for database initialization") false))
+          (log/infof "Database ready at %s [%s]" connect-string (str root))
+          root))))
 
   (defn open
     "Open a connection with `root` bound to the node at `prefix` in the ZooKeeper cluster defined by `connect-string`"

@@ -383,33 +383,37 @@
 
 (defn open
   "Open a resilient ZooKeeper client connection and watch for events on `root` and its descendants"
-  [^zk.node.ZNode root cstring & {:keys [timeout] :or {timeout 8000} :as options}]
+  [^zk.node.ZNode root cstring & {:keys [timeout] :or {timeout 8000}}]
   ;; TODO: make this a method on the ZNode?  Maybe part of watch?
   (let [client (.client root)
-        chandle (client/connect client cstring options)
+        chandle (client/connect client cstring {:timeout timeout})
         watch-chandle (watch-nodes client (path root))
-        pub (async/pub watch-chandle :path)]
+        pub (async/pub watch-chandle :path)
+        sync (watch root pub)]
     ;; Synchronize node watch with cluster state
-    (if (async/alt!! (watch root pub) true
-                     (async/timeout timeout) false)
-      (reify ; a duplex stream a la manifold
-        java.lang.AutoCloseable
-        (close [this] (async/close! this) (async/<!! this)) ; synchronized with connect loop shutdown
-        impl/ReadPort
-        (take! [this handler] (impl/take! chandle handler))
-        impl/Channel
-        (close! [this]
-          (async/close! chandle)
-          (async/close! watch-chandle))
-        (closed? [this] (impl/closed? chandle)))
-      (throw (ex-info "Timed out waiting for root to synchronize with cluster" {:connect-string cstring :timeout timeout})))))
+    (reify ; a duplex stream a la manifold
+      clojure.lang.IDeref
+      (deref [this] (not (async/<!! sync)))
+      clojure.lang.IBlockingDeref
+      (deref [this timeout timeout-value] (async/alt!! (async/timeout timeout) timeout-value sync true))
+      clojure.lang.IPending
+      (isRealized [this] (deref this 0 false))
+      java.lang.AutoCloseable
+      (close [this] (async/close! this) (async/<!! this)) ; synchronized with connect loop shutdown
+      impl/ReadPort
+      (take! [this handler] (impl/take! chandle handler))
+      impl/Channel
+      (close! [this]
+        (async/close! chandle)
+        (async/close! watch-chandle))
+      (closed? [this] (impl/closed? chandle)))))
 
 (defmacro while-watching
   [root connect-string & body]
-  `(let [client# (.client ~root)]
-     (with-open [client-chandle# (client/connect client# ~connect-string)
-                 watch-chandle# (watch-nodes client# (path ~root))]
-       ~@body)))
+  `(with-open [chandle# (open ~root ~connect-string)]
+     (if (deref chandle# 2000 false)
+       ~@body
+       (throw (ex-info "Timed out waiting for root to synchronize with cluster" {:connect-string ~connect-string :timeout 2000})))))
 
 ;; https://stackoverflow.com/questions/49373252/custom-pprint-for-defrecord-in-nested-structure
 ;; https://stackoverflow.com/questions/15179515/pretty-printing-a-record-using-a-custom-method-in-clojure
