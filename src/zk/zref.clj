@@ -108,12 +108,12 @@
             value' (f value)]
         (if (.compareVersionAndSet this version value')
           value'
-          (do
-            (when-not (pos? i) (throw (RuntimeException.
-                                       (format "Aborting update of %s after %d failures over ~%dms"
-                                               (str this) *max-update-attempts* (* 2 n)))))
-            (Thread/sleep n)
-            (recur (* 2 n) (dec i)))))))
+          (if (pos? i)
+            (do (Thread/sleep n)
+                (recur (* 2 n) (dec i)))
+            (throw (RuntimeException.
+                    (format "Aborting update of %s after %d failures over ~%dms"
+                            (str this) *max-update-attempts* (* 2 n)))))))))
   (swap [this f x] (.swap this (fn [v] (f v x))))
   (swap [this f x y] (.swap this (fn [v] (f v x y))))
   (swap [this f x y args] (.swap this (fn [v] (apply f v x y args))))
@@ -161,5 +161,3 @@
 (defmethod clojure.core/print-method ZRef
   [^zk.zref.ZRef zref ^java.io.Writer writer]
   (.write writer (format "#<ZRef\"%s\" Version %d>" (.path zref) (last (.vDeref zref)))))
-
-(def ^:deprecated zref create)
