@@ -100,7 +100,7 @@
   (async/thread (when-not (.close client 5000) (log/warnf "Unable to close client %s" (str client))))
   (async/go-loop []
     (when-let [{state :state :as event} (async/<! cevents)]
-      (log/infof "[%s] Received monitor event: %s" (.hashCode client) event)
+      (log/debugf "[%s] Received monitor event: %s" (.hashCode client) event)
       (if (= state :Closed)
         true
         (recur)))))
@@ -117,8 +117,8 @@
         result (async/go-loop [state ::initial [client cevents :as cpair] (new-z)]
                  (let [[{state' :state :as event} _] (async/alts! [cevents command])]
                    (if event
-                     (do (log/infof "[%s] Received primary event: %s " (.hashCode client) event)
-                         (log/infof "[%s] State transition: %15s -> %15s" (.hashCode client) (name state) (name state'))
+                     (do (log/debugf "[%s] Received primary event: %s " (.hashCode client) event)
+                         (log/debugf "[%s] State transition: %15s -> %15s" (.hashCode client) (name state) (name state'))
                          (let [cpair' (case state'
                                         (:SyncConnected :ConnectedReadOnly) (do (deliver @zap client)
                                                                                 (when (#{:Expired ::initial} state) ; new session
@@ -192,19 +192,6 @@
 (defn open
   [client connect-string & options]
   (connect client connect-string options))
-
-(defn call
-  [zap f]
-  (if-let [z (@@zap)]
-    (loop [i 5]
-      (let [result (try (f z)
-                        (catch KeeperException$ConnectionLossException e ::connection-loss))]
-        (if (= ::connection-loss result)
-          (if (pos? i)
-            (recur (dec i))
-            (throw (ex-info "Exceeded connection loss retry threshold" {:zap zap})))
-          result)))
-    (throw (ex-info "The zap is nil -client has closed!" {:zap zap}))))
 
 (defmacro while->open
   "Creates a client binding to the `name` symbol and threads it (per `->`) into

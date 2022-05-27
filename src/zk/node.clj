@@ -18,24 +18,24 @@
            (java.nio.file Paths Path)
            (java.time Instant)))
 
-(def acls {:open-acl-unsafe ZooDefs$Ids/OPEN_ACL_UNSAFE ; This is a completely open ACL
-           :anyone-id-unsafe ZooDefs$Ids/ANYONE_ID_UNSAFE ; This Id represents anyone
-           :auth-ids ZooDefs$Ids/AUTH_IDS ; This Id is only usable to set ACLs
-           :creator-all-acl ZooDefs$Ids/CREATOR_ALL_ACL ; This ACL gives the creators authentication id's all permissions
-           :read-all-acl ZooDefs$Ids/READ_ACL_UNSAFE ; This ACL gives the world the ability to read
-           })
+(def ^:private acls {:open-acl-unsafe ZooDefs$Ids/OPEN_ACL_UNSAFE ; This is a completely open ACL
+                     :anyone-id-unsafe ZooDefs$Ids/ANYONE_ID_UNSAFE ; This Id represents anyone
+                     :auth-ids ZooDefs$Ids/AUTH_IDS ; This Id is only usable to set ACLs
+                     :creator-all-acl ZooDefs$Ids/CREATOR_ALL_ACL ; This ACL gives the creators authentication id's all permissions
+                     :read-all-acl ZooDefs$Ids/READ_ACL_UNSAFE ; This ACL gives the world the ability to read
+                     })
 
-(def watch-modes {{:persistent? true :recursive? false} AddWatchMode/PERSISTENT
-                  {:persistent? true :recursive? true} AddWatchMode/PERSISTENT_RECURSIVE})
+(def ^:private watch-modes {{:persistent? true :recursive? false} AddWatchMode/PERSISTENT
+                            {:persistent? true :recursive? true} AddWatchMode/PERSISTENT_RECURSIVE})
 
-(def create-modes {;; The znode will not be automatically deleted upon client disconnect
-                   {:persistent? true, :sequential? false} CreateMode/PERSISTENT
-                   ;; The znode will be deleted upon client disconnect, and its name will be appended with a monotonically increasing number
-                   {:persistent? false, :sequential? true} CreateMode/EPHEMERAL_SEQUENTIAL
-                   ;; The znode will be deleted upon the client's disconnect
-                   {:persistent? false, :sequential? false} CreateMode/EPHEMERAL
-                   ;; The znode will not be deleted upon client disconnect, and its name will be appended with a monotonically increasing number
-                   {:persistent? true, :sequential? true} CreateMode/PERSISTENT_SEQUENTIAL})
+(def ^:provate create-modes {;; The znode will not be automatically deleted upon client disconnect
+                             {:persistent? true, :sequential? false} CreateMode/PERSISTENT
+                             ;; The znode will be deleted upon client disconnect, and its name will be appended with a monotonically increasing number
+                             {:persistent? false, :sequential? true} CreateMode/EPHEMERAL_SEQUENTIAL
+                             ;; The znode will be deleted upon the client's disconnect
+                             {:persistent? false, :sequential? false} CreateMode/EPHEMERAL
+                             ;; The znode will not be deleted upon client disconnect, and its name will be appended with a monotonically increasing number
+                             {:persistent? true, :sequential? true} CreateMode/PERSISTENT_SEQUENTIAL})
 
 (defn- stat-to-map
   ([^Stat stat]
@@ -67,31 +67,31 @@
 
 (defn- encode [^String s] {:pre [(string? s)] :post [(instance? (Class/forName "[B") %)]} (.getBytes ^String s "UTF-8"))
 
-(defn ^AsyncCallback$Create2Callback make-create-callback
+(defn- ^AsyncCallback$Create2Callback make-create-callback
   [c tag]
   (reify AsyncCallback$Create2Callback
     (processResult [this rc path ctx name stat]
       (async/put! c {:type ::create :tag tag :rc rc :name name :stat stat}))))
 
-(defn ^AsyncCallback$StatCallback make-stat-callback
+(defn- ^AsyncCallback$StatCallback make-stat-callback
   [c tag]
   (reify AsyncCallback$StatCallback
     (processResult [this rc path ctx stat]
       (async/put! c {:type ::stat :tag tag :rc rc :stat stat}))))
 
-(defn ^AsyncCallback$VoidCallback make-void-callback
+(defn- ^AsyncCallback$VoidCallback make-void-callback
   [c tag]
   (reify AsyncCallback$VoidCallback
     (processResult [this rc path ctx]
       (async/put! c {:type ::void :tag tag :rc rc}))))
 
-(defn ^AsyncCallback$DataCallback make-data-callback
+(defn- ^AsyncCallback$DataCallback make-data-callback
   [c tag]
   (reify AsyncCallback$DataCallback
     (processResult [this rc path ctx data stat]
       (async/put! c {:type ::data :tag tag :rc rc :data data :stat stat}))))
 
-(defn ^AsyncCallback$Children2Callback make-children-callback
+(defn- ^AsyncCallback$Children2Callback make-children-callback
   [c tag]
   (reify AsyncCallback$Children2Callback
     (processResult [this rc path ctx children stat]
@@ -109,7 +109,7 @@
          (rf result {:type :NodeChildrenChanged :path (some-> (.getParent (Paths/get path (into-array String []))) str)})
          result)))))
 
-(defn watch-nodes
+(defn- watch-nodes
   "Start a resilient recursive watch of the node at the given `path` using the
   given `zclient`.  Returns a channel that will receive observed node events.
   The watch can be stopped by closing the zclient."
@@ -125,11 +125,11 @@
       (let [[z _] (async/alts! [session-watch command])]
         (if z
           (do (async/thread (try (.addWatch z path node-watcher watch-mode)
-                                 (log/infof "[%s] [%d] Watch added for %s" (.hashCode z) (.getSessionId z) path)
+                                 (log/debugf "[%s] [%d] Watch added for %s" (.hashCode z) (.getSessionId z) path)
                                  (catch KeeperException kex
                                    (log/error "Failed to set watch on %s: %s!" path (client/translate-exception kex)))))
               (recur))
-          (do (log/infof "Stopping node watch session loop")
+          (do (log/debugf "Stopping node watch session loop")
               (client/deregister zclient session-watch)))))
     (reify
       impl/ReadPort
@@ -235,7 +235,7 @@
           (async/go-loop [watched @cref awaiting awaiting]
             (when-let [{:keys [type tag rc stat name data children] :as report} (async/<! callback-reports)]
               (let [result (first (client/translate-return-code rc))]
-                (log/logf (if (= :OK result) :info :warn) "%-18s Callback report: %16s %-11s" this (clojure.core/name tag) result)
+                (log/logf (if (= :OK result) :debug :warn) "%-18s Callback report: %16s %-11s" this (clojure.core/name tag) result)
                 (when (= :OK result)
                   (let [stat (when stat (stat-to-map stat))
                         awaiting' (disj awaiting tag)
@@ -253,7 +253,7 @@
                                                                     (let [old @vref] (ref-set vref value) old))]
                                                     (when (not (and (= value old) (= (type value) (type old))))
                                                       (async/>! events {::type tag ::stat stat ::value value}))))
-                                                (log/infof "Dataless node encountered %s" this))
+                                                (log/debugf "Dataless node encountered %s" this))
                                               watched)
                                    ::children (if (not (awaiting' ::sync-children))
                                                 (let [[ins rem] (dosync (ref-set sref stat)
