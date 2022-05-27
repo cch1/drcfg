@@ -47,23 +47,6 @@
     (add-watch z :logger (fn [k r o n] (log/tracef "Value of %s update: old: %s; new %s" name o n)))
     z))
 
-(defmacro ns-path [n]
-  `(str "/" (str *ns*) "/" ~n))
-
-(defmacro ^:deprecated def>-
-  "Def a config reference with the given name.  The current namespace will be
-  automatically prepended to create the zookeeper path -when refactoring, note
-  that the namespace may change, leaving the old values stored in zookeeper
-  orphaned and reverting to the default value."
-  [name default & options]
-  (let [nstr (str name)
-        {m :meta :as o} (apply hash-map options)
-        options (mapcat identity
-                        (select-keys (apply hash-map options) [:validator]))]
-    `(let [bpath# (ns-path ~nstr)]
-       (when ~m (>- (str bpath# "/.metadata") ~m))
-       (def ~name (apply >- bpath# ~default ~options)))))
-
 ;; Reference: https://stackoverflow.com/questions/25478158/how-do-i-use-clojure-tools-macro-name-with-attributes
 (defn name-with-attributes-and-options
   "To be used in macro definitions.

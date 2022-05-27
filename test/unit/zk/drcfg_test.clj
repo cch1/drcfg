@@ -14,9 +14,6 @@
     (with-redefs [zclient/open (constantly true)]
       (is (instance? java.io.Closeable (open "cspecs")))))
 
-(deftest def>--evaluates-to-a-var
-  (is (instance? clojure.lang.Var (def>- y0 [12] :validator identity :meta {:doc "My Documentation"}))))
-
 (deftest def>-can-be-evaluted
   (is (instance? clojure.lang.Var (def> ^:foo y1 "My Docstring" 2222))))
 
