@@ -14,13 +14,6 @@
 (def ^:dynamic *connect-string*)
 (def sandbox "/sandbox")
 
-(defmacro with-awaited-connection
-  [root & body]
-  `(let [root# ~root]
-     (with-open [chandle# (znode/open root# (str *connect-string* sandbox))]
-       @chandle#
-       ~@body)))
-
 (use-fixtures :once (fn [f] (with-open [test-server (TestingServer. true)]
                               (binding [*connect-string* (.getConnectString test-server)]
                                 (f)))))
@@ -42,7 +35,7 @@
   (let [$root (znode/new-root)
         v (with-meta ["A"] {:foo true})
         $z (create $root "/myzref" v)]
-    (with-awaited-connection $root
+    (with-open [_ (znode/open $root (str *connect-string* sandbox))]
       (facts (.vDeref $z) =eventually-in=> [(with-metadata? ^:foo ["A"]) 0]
              (meta $z) =in=> {:version 0}))))
 
@@ -51,7 +44,7 @@
         $z0 (create $root "/zref0" "A")
         $z1 (create $root "/zref1" "A")
         $z2 (create $root "/zref2" 1)]
-    (with-awaited-connection $root
+    (with-open [_ (znode/open $root (str *connect-string* sandbox))]
       (facts (.vDeref $z0) =eventually-in=> ["A" 0]
              (.compareVersionAndSet $z0 0 "B") => truthy
              (.vDeref $z0) =eventually-in=> ["B" 1]
@@ -73,7 +66,7 @@
 (deftest connected-zref-updated-by-pushed-values
   (let [$root (znode/new-root)
         $z (create $root "/myzref" "A")]
-    (with-awaited-connection $root
+    (with-open [_ (znode/open $root (str *connect-string* sandbox))]
       (let [c (zoo/connect (str *connect-string* sandbox))]
         (facts (.vDeref $z) =eventually-in=> ["A" 0])
         (zoo/set-data c "/myzref" (.getBytes "^{:foo 2} [\"B\"]") 0)
@@ -87,7 +80,7 @@
         sync (promise)
         v-sync (promise)]
     (with-open [c (zoo/connect (str *connect-string* sandbox))]
-      (with-awaited-connection $root
+      (with-open [_ (znode/open $root (str *connect-string* sandbox))]
         (facts (.vDeref $z) =eventually-in=> [(with-metadata? ^:foo [:A]) 0])
         (add-watch $z :sync (fn [& args] (deliver sync args)))
         (add-versioned-watch $z :v-sync (fn [& args] (deliver v-sync args)))
@@ -101,7 +94,7 @@
         $z (create $root "/myzref" "A" :validator string?)
         sync (promise)]
     (with-open [c (zoo/connect (str *connect-string* sandbox))]
-      (with-awaited-connection $root
+      (with-open [_ (znode/open $root (str *connect-string* sandbox))]
         (facts (.vDeref $z) =eventually-in=> ["A" 0])
         (add-watch $z :sync (fn [& args] (deliver sync args)))
         (zoo/set-data c "/myzref" (.getBytes "23") 0)
@@ -116,7 +109,7 @@
         sync-a (promise)
         sync-b (promise)]
     (with-open [c (zoo/connect (str *connect-string* sandbox))]
-      (with-awaited-connection $root
+      (with-open [_ (znode/open $root (str *connect-string* sandbox))]
         (facts (.vDeref $zA) =eventually-in=> ["A" 0]
                (.vDeref $zB) =eventually-in=> ["B" 0])
         (add-watch $zA :sync (fn [& args] (deliver sync-a args)))
@@ -133,7 +126,7 @@
         $z (create $root "/myzref" "A")
         sync (promise)]
     (with-open [c (zoo/connect (str *connect-string* sandbox))]
-      (with-awaited-connection $root
+      (with-open [_ (znode/open $root (str *connect-string* sandbox))]
         (facts (.vDeref $z) =eventually-in=> ["A" 0])
         (zoo/delete c "/myzref")
         (facts (compare-and-set! $z "A" "B") =throws=> (ex-info? #".*" {::znode/path "/myzref"})

@@ -389,6 +389,7 @@
         chandle (client/connect client cstring options)
         watch-chandle (watch-nodes client (path root))
         pub (async/pub watch-chandle :path)]
+    ;; Synchronize node watch with cluster state
     (if (async/alt!! (watch root pub) true
                      (async/timeout timeout) false)
       (reify ; a duplex stream a la manifold
