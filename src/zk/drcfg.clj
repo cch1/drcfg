@@ -6,7 +6,7 @@
             [clojure.string :as string]
             [clojure.tools.logging :as log]))
 
-;;; USAGE:  see /roomkey/README.md
+;;; USAGE:  see README.md
 
 (def ^:dynamic *root* (znode/new-root))
 
