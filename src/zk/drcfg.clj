@@ -3,7 +3,6 @@
   (:require [zk.zref :as zref]
             [zk.node :as znode]
             [clojure.core.async :as async]
-            [clojure.string :as string]
             [clojure.tools.logging :as log]))
 
 ;;; USAGE:  see README.md
@@ -79,6 +78,10 @@
     (assert (empty? args) "Invalid arguments")
     [(with-meta name attr) v opts]))
 
+(defn- qualify-symbol
+  [ns sym]
+  (symbol (str ns) (str sym)))
+
 (defmacro def>
   "Def a config reference with the given name and default value.  The current namespace will be automatically prepended
   to create the zookeeper path -when refactoring, note that the namespace may change, leaving the old values stored in
@@ -89,7 +92,7 @@
   (let [[symb default options] (name-with-attributes-and-options symb args)
         m (meta symb)
         options (mapcat identity (select-keys options [:validator]))]
-    `(let [bpath# (str "/" (string/replace (str *ns*) #"\." "/") "/" '~symb)
+    `(let [bpath# (str (znode/ident->path (qualify-symbol *ns* '~symb)))
            ^zk.zref.ZRef z# (>- bpath# ~default ~@options)]
        (when ~m (znode/add-descendant (.znode z#) "/.metadata" ~m))
        (def ~symb z#))))

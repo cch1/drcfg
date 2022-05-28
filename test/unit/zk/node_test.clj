@@ -60,19 +60,22 @@
     (is (= nil (namespace n))))
   (let [n (add-descendant (new-root) "/a0" 0)]
     (is (= "a0" (name n)))
-    (is (= "/" (namespace n))))
+    (is (nil?  (namespace n))))
   (let [n (add-descendant (new-root) "/a1/b/c/d" 1)]
     (is (= "d" (name n)))
-    (is (= "/a1/b/c" (namespace n))))
+    (is (= "a1.b.c" (namespace n))))
+  (let [n (add-descendant (new-root) "/a1/b/c.d" 1)]
+    (is (= "c.d" (name n)))
+    (is (= "a1.b" (namespace n))))
   (let [n (new-root "/a/b/c")]
     (is (= "c" (name n)))
-    (is (= "/a/b" (namespace n))))
+    (is (= "a.b" (namespace n))))
   (let [n (add-descendant (new-root "/a/b/c") "/d" 0)]
     (is (= "d" (name n)))
-    (is (= "/a/b/c" (namespace n))))
+    (is (= "a.b.c" (namespace n))))
   (let [n (add-descendant (new-root "/a/b/c") "/d/e/f/g" 1)]
     (is (= "g" (name n)))
-    (is (= "/a/b/c/d/e/f" (namespace n)))))
+    (is (= "a.b.c.d.e.f" (namespace n)))))
 
 (deftest znode-implements-IMeta
   (let [$root (new-root)

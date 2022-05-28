@@ -67,6 +67,19 @@
 
 (defn- encode [^String s] {:pre [(string? s)] :post [(instance? (Class/forName "[B") %)]} (.getBytes ^String s "UTF-8"))
 
+(defn path->keyword
+  [path]
+  {:pre [(.isAbsolute path)]} ; semantically importantn but not technically required
+  (let [namespace-str (when-let [nss (seq (butlast path))] (string/join "." nss))
+        name-str (str (last path))]
+    (keyword namespace-str name-str)))
+
+(defn ident->path
+  [ident]
+  (let [ns (if (qualified-ident? ident) (namespace ident) "")
+        n (name ident)]
+    (Paths/get (str "/" (string/replace ns #"\." "/")) (into-array String [n]))))
+
 (defn- ^AsyncCallback$Create2Callback make-create-callback
   [c tag]
   (reify AsyncCallback$Create2Callback
@@ -331,7 +344,7 @@
 
   clojure.lang.Named
   (getName [this] (str (.getFileName path)))
-  (getNamespace [this] (some-> (.getParent path) str))
+  (getNamespace [this] (namespace (path->keyword path)))
 
   clojure.lang.IFn
   (invoke [this descendant] (loop [parent this [head & tail] (Paths/get descendant (into-array String []))]
