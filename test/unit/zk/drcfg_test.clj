@@ -21,7 +21,7 @@
 (deftest def>-can-be-evaluted
   (let [v #'y1]
     (is (instance? clojure.lang.Var v))
-    (is (= (str (znode/ident->path (symbol v))) (zref/path (var-get v))))))
+    (is (= (str (znode/->path (symbol v))) (zref/path (var-get v))))))
 
 (deftest def>-installs-the-optional-validate-on-the-zref
   (is (fn? (get-validator (var-get (def> ^:foo y2 "My Docstring" 2222 :validator integer?))))))

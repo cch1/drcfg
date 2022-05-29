@@ -116,9 +116,12 @@
   (let [$root (new-root)
         $child (add-descendant $root "/a/b/c" 0)]
     (is (instance? zk.node.ZNode ($root "/a")))
-    (is (= $child ($root "/a/b/c")))
     (is (nil? ($root "/a/dddb/c")))
-    (is (instance? zk.node.ZNode (apply $root ["/a/b"])))))
+    (is (instance? zk.node.ZNode (apply $root ["/a/b"])))
+    (is (= $child ($root "/a/b/c")))
+    (is (= $child ($root :a.b/c)))
+    (is (= $child ($root 'a.b/c)))
+    (is (= $child ($root ["a.b" :c])))))
 
 #_ (future-deftest "ZNode supports `impl/ReadPort` and `impl/Channel`"
                    (let [$root (new-root)

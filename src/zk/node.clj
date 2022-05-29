@@ -74,11 +74,23 @@
         name-str (str (last path))]
     (keyword namespace-str name-str)))
 
-(defn ident->path
+(defmulti qualify-ident "Qualify the given simple identifier with the given namespace" (comp type second vector))
+(defmethod qualify-ident clojure.lang.Keyword [ns kw] (keyword (str ns) (name kw)))
+(defmethod qualify-ident clojure.lang.Symbol [ns sym] (symbol (str ns) (name sym)))
+
+(defn- ident->path
   [ident]
   (let [ns (if (qualified-ident? ident) (namespace ident) "")
         n (name ident)]
     (Paths/get (str "/" (string/replace ns #"\." "/")) (into-array String [n]))))
+
+(defmulti ->path "Convert the argument to a java.nio.file.Path" type)
+(defmethod ->path clojure.lang.Keyword [kw] (ident->path kw))
+(defmethod ->path clojure.lang.Symbol [sym] (ident->path sym))
+(defmethod ->path String [s] (Paths/get s (into-array String [])))
+(defmethod ->path clojure.lang.PersistentVector [[ns n]] (->path (qualify-ident ns n)))
+(defmethod ->path java.nio.file.Path [p] p)
+(defmethod ->path :default [obj] (->path (str obj)))
 
 (defn- ^AsyncCallback$Create2Callback make-create-callback
   [c tag]
@@ -347,7 +359,7 @@
   (getNamespace [this] (namespace (path->keyword path)))
 
   clojure.lang.IFn
-  (invoke [this descendant] (loop [parent this [head & tail] (Paths/get descendant (into-array String []))]
+  (invoke [this descendant] (loop [parent this [head & tail] (->path descendant)]
                               (if head
                                 (let [abs-path (.resolve (.-path parent) head)]
                                   (when-let [child (some (fn [^ZNode node] (when (= (.-path node) abs-path) node)) @(.cref parent))]
