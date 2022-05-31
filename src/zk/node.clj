@@ -301,7 +301,7 @@
                       (async/>! events {::type ::synchronized ::stat stat})
                       (async/close! sync))
                     (recur watched' awaiting')))))))
-        (async/<! sync))))
+        (not (async/<! sync)))))
 
   (create! [this options] (let [{:keys [rc stat]} (async/<!! (create! this (async/chan) options))]
                             (if (= :OK (first (client/translate-return-code rc)))
@@ -414,12 +414,11 @@
         watch-chandle (watch-nodes client (path root))
         pub (async/pub watch-chandle :path)
         sync (watch root pub)]
-    ;; Synchronize node watch with cluster state
     (reify ; a duplex stream a la manifold
       clojure.lang.IDeref
-      (deref [this] (not (async/<!! sync)))
+      (deref [this] (async/<!! sync))
       clojure.lang.IBlockingDeref
-      (deref [this timeout timeout-value] (async/alt!! (async/timeout timeout) timeout-value sync true))
+      (deref [this timeout timeout-value] (async/alt!! (async/timeout timeout) timeout-value sync ([v] v)))
       clojure.lang.IPending
       (isRealized [this] (deref this 0 false))
       java.lang.AutoCloseable
