@@ -131,7 +131,7 @@
     ([result {:keys [type path] :as input}]
      (let [result (rf result input)]
        (if (#{:NodeCreated :NodeDeleted} type)
-         (rf result {:type :NodeChildrenChanged :path (some-> (.getParent (Paths/get path (into-array String []))) str)})
+         (rf result {:type :NodeChildrenChanged :path (some-> (.getParent (->path path)) str)})
          result)))))
 
 (defn- watch-nodes
@@ -392,16 +392,15 @@
   ([] (new-root "/"))
   ([path] (new-root path ::root))
   ([path value] (let [client (client/create)
-                      events (async/chan (async/sliding-buffer 8))
-                      p (Paths/get path (into-array String []))]
-                  (->ZNode client p (ref value) (ref #{}) (ref default-stat) events))))
+                      events (async/chan (async/sliding-buffer 8))]
+                  (->ZNode client (->path path) (ref value) (ref #{}) (ref default-stat) events))))
 
 (defn ^zk.node.ZNode add-descendant
   "Add a descendant ZNode to the given parent's (sub)tree `root` ZNode at the given (relative) `path` carrying the given `value`
   creating placeholder intermediate nodes as required."
   [^zk.node.ZNode parent path value]
   {:pre [(re-matches #"/.*" path)]}
-  (loop [parent parent [head & tail] (Paths/get path (into-array String []))]
+  (loop [parent parent [head & tail] (->path path)]
     (if-not (empty? tail)
       (recur (update-or-add-child parent head ::placeholder) tail)
       (update-or-add-child parent head value))))

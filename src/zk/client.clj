@@ -24,7 +24,6 @@
             KeeperException$RequestTimeoutException KeeperException$RuntimeInconsistencyException KeeperException$SessionClosedRequireAuthException
             KeeperException$SessionExpiredException KeeperException$SessionMovedException KeeperException$SystemErrorException
             KeeperException$UnimplementedException KeeperException$UnknownSessionException]
-           (java.nio.file Paths Path)
            (java.time Instant OffsetDateTime)))
 
 ;; https://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html
