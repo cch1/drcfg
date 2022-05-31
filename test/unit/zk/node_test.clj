@@ -28,12 +28,6 @@
   (let [n (add-descendant (new-root) "/a" "a")]
     (is (instance? zk.node.ZNode (add-descendant n "/b" "b")))))
 
-(deftest existing-children-are-never-overwritten
-  (let [$root (new-root)
-        $z0 (add-descendant $root "/0" "0")]
-    (is (thrown-with-msg? AssertionError #"Can't overwrite" (add-descendant $root "/0" "1")))
-    (is (= 1 (count $root)))))
-
 (deftest existing-placeholders-may-be-overlaid
   (let [$root (new-root)]
     (add-descendant $root "/1/0" "10") ; Node "/1" is a placeholder node

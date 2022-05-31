@@ -180,7 +180,6 @@ In addition to the above standard clojure interfaces, ZNodes also support severa
 * path - Return the string path of the ZNode
 * create-child - Create a child _without_ connecting him to his parent.
 * update-or-add-child - Update the existing child or create a new child of the ZNode at the given path.
-* overlay - Overlay the existing placeholder ZNode's value with a concrete value
 * signature - Return a (Clojure hash equivalent) signature of the state of the subtree at this ZNode.
 
 #### zk.node.BackedZNode

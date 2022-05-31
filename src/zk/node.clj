@@ -177,7 +177,6 @@
   (path [this])
   (create-child [this name value] "Create a child, but do not adopt him into the collection of children")
   (update-or-add-child [this path value] "Update the existing child with `value` or create a new child at `path` with the (default) `value`")
-  (overlay [this v] "Overlay the existing placeholder node's value with the concrete value `v`")
   (signature [this] "Return a (Clojure) hash equivalent to a signature of the state of the subtree at this ZNode"))
 
 (defprotocol ConnectedNode
@@ -195,23 +194,15 @@
 (deftype ZNode [client path vref cref sref events]
   TreeNode
   (path [this] (str path))
-  (overlay [this v] ; this is the ugly consequence of child nodes (vars) being created before their parents (namespaces).
-    (dosync (alter vref (fn [old-v]
-                          (if (not= old-v v)
-                            (if (-> sref deref :version pos?)
-                              (do (log/warnf "Refusing to overwrite cluster-synchronized value at %s" (str this)) old-v)
-                              (do (assert (= old-v ::placeholder) (format "Can't overwrite existing node at %s" (str this))) v))
-                            old-v))))
-    this)
   (create-child [this name v] (let [events (async/chan (async/sliding-buffer 8))
                                     p (.resolve path name)]
                                 (ZNode. client p (ref v) (ref #{}) (ref default-stat) events)))
   (update-or-add-child [this name v]
-    (let [child (create-child this name v)]
-      (dosync (if (contains? @cref child)
-                (when (not= v ::placeholder) (overlay (@cref child) v))
-                (alter cref conj child)))
-      (get @cref child)))
+    (let [child (create-child this name v)
+          children (dosync (if (contains? @cref child)
+                             @cref
+                             (alter cref conj child)))]
+      (get children child)))
 
   ConnectedNode
   (watch [this pub]
