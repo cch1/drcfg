@@ -311,7 +311,7 @@
                           :or {data @vref persistent? true sequential? false acl (acls :open-acl-unsafe)}}]
     (let [create-mode (create-modes {:persistent? (boolean persistent?), :sequential? (boolean sequential?)})
           callback (make-create-callback channel ::created!)
-          data ((comp encode serialize) data)]
+          data (when-not (= ::placeholder data) ((comp encode serialize) data))]
       (client #(.create % (.path this) data acl create-mode callback nil)) channel))
   (update! [this data version options] (let [{:keys [rc stat]} (async/<!! (update! this data version (async/chan) options))]
                                          (if (= :OK (first (client/translate-return-code rc)))
